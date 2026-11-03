@@ -2,6 +2,10 @@
 
 This is the durable copy of the Gate A close-out task list. Claude's built-in task list probably won't survive step 2.6 (`/clear`), which is exactly what `tasklist-persist` tests, or the new session in 3.1. After either one, point Claude at this file to re-create the open tasks. The numbers in brackets are built-in task ids: item 1's are from session `119c2caf`, and items 2.3a onward are from the resumed session `9ea42fa8`.
 
+**After `/clear` (step 2.6), start here.** `/clear` also wipes Claude's conversation, so send: `Read spike/taskmaster-spike/GATE-A-TASKS.md and carry on from the first open item.` Then Claude:
+1. Reads `/tm-spike status` (you run it and paste the output) and records the `tasklist-persist` result under 2.6.
+2. Checks the header. If it reads `/18 checks`, `/clear` loaded the new code (2.3b is done): run 2.3c in auto mode now, then go on to 3.1. If it still reads `/17`, 2.3b and 2.3c move into the bypass session (3.1), which starts fresh and loads the new code.
+
 **Decisions taken**
 - The list is kept in two places: built-in tasks and this file.
 - If `deny-write-subagent` fails, G1 and the Plan Gate cover only the main loop, and the gap is documented. That isn't a no-go, because Phase 1 is main-loop only.
@@ -27,8 +31,8 @@ This is the durable copy of the Gate A close-out task list. Claude's built-in ta
 - [ ] 2.3b **Deferred to the next session start.** `/reload-plugins` isn't available over a remote connection, and the mods question didn't come up again. The synced dev-mods copy loads by itself when the session next starts or resumes (as it did after the earlier container restart). Then `/tm-spike status` reads `/18 checks`. [#8]
 - [ ] 2.3c `/tm-spike probe deny-handback`, then "Use a subagent to read docs/taskmaster-plan.md and summarise it in one line." A pass means the subagent was held, kept working, and its report ends with `SPIKE-HANDBACK-CONTINUED`. Run it right after 2.3b, together with 3.1. [#9]
 - [x] 2.4 `readonly-query`: done without re-running the probe. The row now refreshes itself from real calls (`isReadOnly` on TaskList ×1, Bash ×1). A `$.tool.check` query still can't read it, so the Plan Gate decides in the real call's `tool.check`. [#10]
-- [ ] 2.5 `/compact`: `compaction-events` turns to pass. It runs before `/clear` on purpose. [#11]
-- [ ] 2.6 Claude first ticks this file and pushes. Then "Create a task called persistence check.", then `/clear`. About 3 s later `tasklist-persist` reads PERSISTS or DOES NOT PERSIST. Don't edit the mod between these two steps. [#12]
+- [x] 2.5 `/compact`: **pass**. Order seen: session.compact → PreCompact → SessionStart(compact) → PostCompact → session.compact.done, so `session.compact` wraps the whole compaction. `sessionstart-source` now has both `compact` and `clear` and passes. [#11]
+- [ ] 2.6 Claude first ticks this file and pushes (done). Then "Create a task called persistence check.", then `/clear`. About 3 s later `tasklist-persist` reads PERSISTS or DOES NOT PERSIST. Don't edit the mod between these two steps. The baseline is already on disk: `findings.json` holds session `9ea42fa8`'s list (tasks #1–#16), so the comparison works even if the new task isn't saved before `/clear`. [#12]
 
 ## 3. Bypass session, report, Gate A, Phase 1
 - [ ] 3.1 In bypass permissions mode with the spike loaded: make at least 5 tool calls (`check-every-mode` should pass). Re-run `subagent-stop-block` (and `deny-handback`, if it failed) to see whether the subagent results depend on the mode. [#13]
@@ -39,4 +43,4 @@ This is the durable copy of the Gate A close-out task list. Claude's built-in ta
 ## Observed along the way
 - **The task list is kept per session id.** The container restarted and resumed the first session (`9ea42fa8`). Its built-in list came back (the old probe tasks #4–#6), while the list made in `119c2caf` (the session after `/clear`) wasn't visible. Step 2.6 records what `/clear` does in the spike's own evidence.
 - **No hot reload in this run.** Mod edits load only at the next session start: `/reload-plugins` isn't available remotely, and the mods question didn't come up again.
-- **`check-every-mode` so far:** `tool.check` ran for every main-loop call in auto (11/11) and plan (37/37) modes. Only bypass is left (3.1).
+- **`check-every-mode` so far:** `tool.check` ran for every main-loop call in auto (15/15) and plan (37/37) modes. Only bypass is left (3.1).
