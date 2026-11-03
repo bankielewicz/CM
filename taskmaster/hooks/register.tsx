@@ -26,11 +26,13 @@ export const register: Register = (on, options) => {
       storeGet: key => $.store.get(key),
       storeSet: (key, value) => $.store.set(key, value),
     }
-    const result = await next(e)
-    selfCheck.note('session.start')
-    // Saves start here, beginning with the events noted before this point.
-    selfCheck.start(io, config)
-    return result
+    try {
+      return await next(e)
+    } finally {
+      selfCheck.note('session.start')
+      // Saves start here, beginning with the events noted before this point.
+      selfCheck.start(io, config)
+    }
   })
 
   // The observers: each notes its event and passes it on unchanged. The engine
