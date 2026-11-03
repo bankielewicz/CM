@@ -71,10 +71,8 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 
 ## Where the work stands
 
-`spike/taskmaster-spike/GATE-A-TASKS.md` is the durable checklist, and the first open item is the next step. Built-in tasks don't survive `/clear` or a new session, so re-create them from that file. `RUNBOOK.md` has the steps for each probe and how to read its result. Once Gate A is recorded (item 3.3), prune the first two bullets below.
+`spike/taskmaster-spike/GATE-A-TASKS.md` is the durable checklist, and the first open item is the next step. Built-in tasks don't survive `/clear` or a new session, so re-create them from that file. `RUNBOOK.md` has the steps for each probe and how to read its result. Gate A is recorded in plan §10.1 (GO, 2026-11-03).
 
-- Don't start a new cloud session to continue a run. Its fresh container has neither the session's mods folder nor the gitignored findings.
-- Over a remote connection `/reload-plugins` is unavailable, and `/clear` doesn't load new mod code. Edits load at the next session start.
 - `.taskmaster/spike/` isn't committed, so anything Gate A needs goes into plan §10.1. New spike learnings go into plan §9, and behaviour changes into `RUNBOOK.md`.
 - The default branch is protected and nobody can bypass the ruleset, so every change lands through a PR, including where `GATE-A-TASKS.md` says to push.
 - The spike predates the coverage bar and is exempt in `coverage-exempt.json`, at 61.58% (`hooks/register.tsx` 57.14%). Its tests must still pass. Delete the entry with the spike once Gate A closes, but land the first real mod before deleting the spike: with no mods at all the gate fails, which blocks every merge.

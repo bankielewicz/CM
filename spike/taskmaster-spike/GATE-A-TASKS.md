@@ -44,8 +44,8 @@ This is the durable copy of the Gate A close-out task list. Claude's built-in ta
   - **Why the result depends on the mode:** only auto-mode subagents report through `SubagentHandback`. Across this session's seven subagent runs, all 5 auto-mode ones got the "deliver your report through SubagentHandback" reminder and used the tool. The plan-mode one (`a6ef00ac`) and the default-mode one (`a1a53119`) got neither. In auto mode the handback delivers the report before SubagentStop, so a stop block can't hold the subagent (2.3, 2.3d). Without a handback, it can.
   - **`deny-handback` in default mode:** it can't fire, because no handback is made. It stayed armed through `a1a53119`'s run.
   - **For G4 (3.3):** two mechanisms, one per path. Hold plain-answer subagents with the SubagentStop block (works). Hold handback subagents with a `SubagentHandback` deny: that holds them, but the subagent retried without acting on the deny (2.3c). Bypass stays untested. [#13]
-- [ ] 3.2 `/tm-spike report`: every row is answered, and the verdict is read against §10.1 [#14]
-- [ ] 3.3 Record Gate A in `docs/taskmaster-plan.md` §10.1: the verdict, the date, the build, the fallbacks switched on, and the findings table (`.taskmaster/spike/` is gitignored). Settle G4's mechanism from `subagent-stop-block` (auto and bypass) and `deny-handback`. Tick this file, then commit and push. [#15]
+- [x] 3.2 `/tm-spike report`: every row is answered, and the verdict is read against §10.1. **GO**, with 18/18 answered and all three blocking checks passed. [#14]
+- [x] 3.3 Record Gate A in `docs/taskmaster-plan.md` §10.1: the verdict, the date, the build, the fallbacks switched on, and the findings table (`.taskmaster/spike/` is gitignored). Settle G4's mechanism from `subagent-stop-block` (auto and bypass) and `deny-handback`. Tick this file, then commit and push. **Done:** §10.1 has the result, the fallbacks and the G4 table. §9 has corrections to three earlier claims plus the session-start finding. RUNBOOK §2 and §5 have the mode notes. [#15]
 - [ ] 3.4 Split the Phase 1 MVP (plan §9) into tasks [#16]
 
 ## Observed along the way

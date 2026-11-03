@@ -34,9 +34,9 @@ Arm a probe, then send the prompt shown. Run one probe at a time.
 | `/tm-spike probe subagent-stop-block` | `Use a subagent to read docs/taskmaster-plan.md and summarise it in one line.` | `subagent-stop-block` | The subagent Claude spawns is blocked once, continues, and its final answer (read from its `turn.complete`) ends with `SPIKE-SUB-CONTINUED` |
 | `/tm-spike probe deny-handback` | `Use a subagent to read docs/taskmaster-plan.md and summarise it in one line.` | `deny-handback` | The spawned subagent's first `SubagentHandback` is refused, it keeps working, and its final report ends with `SPIKE-HANDBACK-CONTINUED` |
 
-**About the subagent probes.** Claude Code's own helper agents (the compaction summarizer, and small helpers that run around each prompt) raise SubagentStop too, with an empty agent type. `subagent-stop-block` ignores them and fires only for an agent started through the Agent tool. On 2.1.317, a spawned agent's SubagentStop has an empty `last_assistant_message`, and its second stop comes *before* its `turn.complete`. So the probe judges the marker from `turn.complete`'s answer, and reports `stop_hook_active` from the second stop.
+**About the subagent probes.** Claude Code's own helper agents (the compaction summarizer, and small helpers that run around each prompt) raise SubagentStop too, with an empty agent type. `subagent-stop-block` ignores them and fires only for an agent started through the Agent tool. On 2.1.317, a spawned agent's SubagentStop has an empty `last_assistant_message` when it hands back (auto mode), and its second stop comes *before* its `turn.complete`. So the probe judges the marker from `turn.complete`'s answer, and reports `stop_hook_active` from the second stop.
 
-**Why `deny-handback` exists.** On 2.1.317 in auto mode, `subagent-stop-block` failed. The subagent had already delivered its report through the `SubagentHandback` tool, the engine ended it whatever SubagentStop answered, and there was no second stop. `deny-handback` tests the alternative for G4: refuse that tool call while the subagent is still running. The hand-back report carries auto mode's review, so the path may differ by mode. Run both subagent probes once more in the bypass session (§5); their evidence records the mode.
+**Why `deny-handback` exists.** On 2.1.317 in auto mode, `subagent-stop-block` failed. The subagent had already delivered its report through the `SubagentHandback` tool, the engine ended it whatever SubagentStop answered, and there was no second stop. `deny-handback` tests the alternative for G4: refuse that tool call while the subagent is still running. **The path differs by mode.** On 2.1.317, only auto-mode subagents hand back. In plan and default mode, a subagent ends with a plain answer, and `subagent-stop-block` holds it (it passed in default mode). So run `subagent-stop-block` in plan or default mode, and `deny-handback` in auto mode. In the other modes nothing is handed back, and `deny-handback` stays armed. Arming a probe resets its row to pending, so note a result before re-arming it in another mode.
 
 ## 3. Skills: does a plugin's `skills/` folder load, and which loop is a skill attributed to?
 
@@ -61,10 +61,12 @@ Run these in this order. `/clear` clears the conversation, and may clear the tas
 
 The Plan Gate decides in the real call's `tool.check`, so `tool.check` has to fire in every permission mode, bypass included. `check-every-mode` counts main-loop model tool calls per permission mode (read from `permission_mode` on UserPromptSubmit, Stop and SessionStart) and how many of them had a `tool.check`. It updates at the end of each turn.
 
+**Cloud sessions don't offer bypass.** Their mode menu has only Accept edits, Plan and Auto, and Accept edits records as `default`. So run this section from a terminal session. A cloud session on 2.1.317 had every call checked: auto 90/90, plan 59/59, default 28/28.
+
 1. Start a session in bypass permissions mode with the spike loaded, for example `claude --permission-mode bypassPermissions --plugin-dir ./spike/taskmaster-spike`, or switch the session's mode to bypass.
 2. Ask for anything that makes at least 5 tool calls (for example `List the files in spike/taskmaster-spike and read its README.`).
 3. Run `/tm-spike status`. `check-every-mode` passes when bypassPermissions shows `N/N` with N ≥ 5, and fails if bypass skipped a `tool.check`. A miss in another mode is listed but doesn't decide the check.
-4. While in bypass, re-run `subagent-stop-block` (and `deny-handback`, if it failed in auto mode), to see whether the subagent results depend on the mode. Write down the auto-mode results first: a re-run replaces a check's row.
+4. While in bypass, re-run both subagent probes, to see which way a bypass-mode subagent ends (see the subagent-probe notes in §2). Write down the auto-mode results first: a re-run replaces a check's row.
 
 ## 6. Report
 
