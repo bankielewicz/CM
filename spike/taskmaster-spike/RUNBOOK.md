@@ -17,7 +17,7 @@ Then run `/tm-spike status`. Every check reads `· not run`, except `readonly-qu
 | --- | --- | --- |
 | `/tm-spike probe git-commit-only` | `git-commit-only` | `git add -- .taskmaster/` then `git commit --only -- .taskmaster/` commits only that folder, and other staged work stays staged. It runs in a throwaway repo under `/tmp`. |
 | `/tm-spike probe journal-stress` | `journal-budget` | 1,200 events roll over at least twice, with p95 write ≤ 100 ms and max ≤ 1 s |
-| `/tm-spike probe readonly-query` | `readonly-query` | A `$.tool.check` query marks `ls` as read-only and `rm …` as not, before anything runs |
+| `/tm-spike probe readonly-query` | `readonly-query` | A `$.tool.check` query marks `ls` as read-only and `rm …` as not, before anything runs. If the mod's own hook never sees its queries (as observed on 2.1.317), the check says so and lists which real calls carried `isReadOnly` instead. |
 
 ## 2. Probes you arm, then trigger with a prompt
 

@@ -531,6 +531,7 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 - **State references need literals.** `atom({ plugin, key })` must name the plugin and key as string literals, not constants.
 - **Relative `$.fs` paths resolve against the session's working directory** (the plugin folder under `claude plugin test`), so `.taskmaster/` lands in the project as intended.
 - **`git commit --only` needs a prior `git add`** for new files (see F8.1).
+- **A mod's own `tool.check` hook isn't run on its own `$.tool.check` query** (observed live in the loaded spike). So the Plan Gate can't ask "is this read-only?" from inside `tool.call`. Instead it decides in the real call's `tool.check`, which runs inside `tool.call` and carries `isReadOnly`, answering `{ decision: 'deny' }` there. The spike now records which real calls carry the flag. Phase 0 must still confirm that `tool.check` fires in every permission mode, including bypass.
 - **The validator lists every "gating hook without .catch"** (tool.call, Stop, compaction, ...). An observer that throws is skipped, which fails open. That suits the spike and the real mod's Stop gate; only the `TaskUpdate` gate gets a `.catch`.
 
 → **Gate A (technical go/no-go, §10.1).**

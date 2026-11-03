@@ -102,6 +102,9 @@ export const register: Register = on => {
   const order = { inside: 0, before: 0, sampled: 0 }
   const queryResults: Record<string, boolean> = {}
   let pendingQuery: string | undefined
+  let queriesSeen = 0
+  // Real (model) calls whose tool.check carried isReadOnly, by tool.
+  const realReadOnly: Record<string, number> = {}
   const openSpawns = new Set<string>()
   let lastSpawnSeq = -100
   let lastTyped: { name: string; seq: number } | undefined
@@ -285,6 +288,7 @@ export const register: Register = on => {
     }
     const write = 'rm -rf ./taskmaster-spike-never-run'
     const samples = ['ls', 'git status', write]
+    queriesSeen = 0
     for (const command of samples) {
       pendingQuery = command
       queryResults[command] = false
@@ -295,14 +299,32 @@ export const register: Register = on => {
       }
     }
     pendingQuery = undefined
+    if (queriesSeen === 0) {
+      // The mod's own tool.check hook is not run on its own query, so a
+      // query cannot reveal isReadOnly; the real call's tool.check can.
+      await setCheck(
+        'readonly-query',
+        'info',
+        `The mod's own tool.check hook saw 0 of ${samples.length} of its $.tool.check queries, so a query can't read isReadOnly. ` +
+          `Use the real call's tool.check instead: ${realReadOnlySummary()}.`,
+      )
+      return
+    }
     const reads = samples.filter(c => queryResults[c]).map(c => `"${c}"`)
     const isRight = queryResults.ls === true && queryResults[write] === false
     await setCheck(
       'readonly-query',
       isRight ? 'pass' : 'info',
-      `isReadOnly on a $.tool.check query: ${reads.length > 0 ? `set for ${reads.join(', ')}` : 'never set'}; ` +
+      `Own hook saw ${queriesSeen}/${samples.length} queries; isReadOnly ${reads.length > 0 ? `set for ${reads.join(', ')}` : 'never set'}; ` +
         `absent for the rm command: ${queryResults[write] === false ? 'yes' : 'no'}.`,
     )
+  }
+
+  function realReadOnlySummary(): string {
+    const entries = Object.entries(realReadOnly)
+    return entries.length === 0
+      ? 'no real call has carried isReadOnly yet'
+      : `isReadOnly carried on real calls to ${entries.map(([tool, n]) => `${tool} ×${n}`).join(', ')}`
   }
 
   async function probeGit(): Promise<string> {
@@ -677,7 +699,8 @@ export const register: Register = on => {
     const verdict = await next(e)
     const id = e.tool_use_id
     if (id === undefined) {
-      if (pendingQuery !== undefined && next.origin.plugin === PLUGIN) {
+      if (pendingQuery !== undefined) {
+        queriesSeen += 1
         queryResults[pendingQuery] = e.isReadOnly === true
       }
       await log({ kind: 'tool.check.query', tool: e.tool, isReadOnly: e.isReadOnly === true, origin: next.origin.plugin })
@@ -689,6 +712,9 @@ export const register: Register = on => {
       order.before += 1
     }
     order.sampled += 1
+    if (e.isReadOnly === true) {
+      realReadOnly[e.tool] = (realReadOnly[e.tool] ?? 0) + 1
+    }
     await log({
       kind: 'tool.check',
       id,
@@ -701,7 +727,7 @@ export const register: Register = on => {
       await setCheck(
         'check-call-order',
         'info',
-        `Of ${order.sampled} model tool calls: tool.check ran inside tool.call (after it started, before next() returned) ${order.inside}×, before tool.call ${order.before}×.`,
+        `Of ${order.sampled} model tool calls: tool.check ran inside tool.call (after it started, before next() returned) ${order.inside}×, before tool.call ${order.before}×; ${realReadOnlySummary()}.`,
       )
     }
     return verdict

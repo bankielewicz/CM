@@ -110,7 +110,7 @@ export const CHECKS: readonly CheckInfo[] = [
     title: '$.tool.check query exposes isReadOnly before a call runs',
     answers: 'Plan Gate classification',
     how: 'Automatic at session start, or /tm-spike probe readonly-query',
-    ifFails: 'Plan Gate keeps a conservative write-tool list instead',
+    ifFails: "Decide at the real call's tool.check, which carries isReadOnly (or keep a conservative write-tool list)",
     isBlocking: false,
   },
   {
