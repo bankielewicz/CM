@@ -1,6 +1,6 @@
 # Taskmaster: a universal adherence guardrail mod for Claude Code
 
-Status: design plan, revised after advisor review (no code yet) · Target: Claude Code function-hooks mod API (early access; checked against build 2.1.317's `claude-code.d.ts`)
+Status: design plan, revised after advisor review and user review (no code yet) · Target: Claude Code function-hooks mod API (early access; checked against build 2.1.317's `claude-code.d.ts`)
 
 ## 1. Short answer
 
@@ -62,6 +62,7 @@ The task list improves (a) and (b) only when four things hold:
 5. **Fail open for nags, fail closed only where safe.** The Stop gate fails open, because a bug that fails closed traps the user. Only the `TaskUpdate` gate may fail closed, and its deny message must show how to waive.
 6. **Proportional.** Reference skills get no contract. A contract with low extraction confidence is advisory only.
 7. **The context window is not storage.** The mod writes checkpoints to disk on observed events and never relies on Claude to remember.
+8. **Measure before believing.** Every gate decision is logged with the arm and the contract source. Go/no-go thresholds are written down *before* the evaluation runs (§10), and only a human-approved change validated by replay can loosen or tighten a gate (F15).
 
 ## 4. Architecture
 
@@ -85,6 +86,12 @@ TaskCreate/TaskUpdate/TodoWrite results ──►   │   + task → step map, t
                                │                                           checkpoint.json · HANDOFF.md · journal
                                ▼                                                        │
             status line · band · Pane · summary below the answer         Resumer (SessionStart compact/startup/clear)
+
+every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.jsonl, arm + contract_source on each event)
+                                                 │
+                     tripwires ─► Incidents ─► RCA / 5 whys (idle, separate model call) ─► Proposals
+                                                                                             │
+                                          replay journals + shadow mode + human accept ◄─────┘
 ```
 
 ## 5. Features and functionality (the build list)
@@ -167,7 +174,8 @@ TaskCreate/TaskUpdate/TodoWrite results ──►   │   + task → step map, t
 ```
 - `$.store` holds only a mirror and an index (it's per user and per machine).
 - Secrets are redacted before every write.
-- `checkpointGit`: `ignore` (default; the mod adds `.taskmaster/` to `.git/info/exclude`) or `commit`. **In ephemeral containers (cloud sessions), only committed and pushed checkpoints survive, so use `commit` there.** The mod never pushes by itself.
+- **`checkpointGit: commit` (default, approved).** At milestone checkpoints (step completed, PreCompact, Stop with open work, session end), the mod commits `.taskmaster/` alone with `git commit --only -m "taskmaster: checkpoint <run> <step>" -- .taskmaster/`, through `$.process.run`. `--only` keeps the user's staged work out of the commit. The fixed prefix makes these commits easy to squash or filter before a PR. Commits are throttled to at most one per milestone. Other values: `ignore` (excluded through `.git/info/exclude`) and, in Phase 2, `ref` (commit to `refs/taskmaster/<run>` with a temporary index, so the working branch history isn't touched).
+- **`checkpointPush`:** `off` (default) or `milestone`. Commits survive a new session on the same clone. **In ephemeral containers (cloud sessions), the commits must also be pushed to survive**, so set `milestone` there, or rely on the session's own push.
 
 **F8.2 Contents**, enough to resume with no transcript:
 - the run id, schema version, the sessions involved, and timestamps,
@@ -224,17 +232,135 @@ TaskCreate/TaskUpdate/TodoWrite results ──►   │   + task → step map, t
 - `strictness`: `observe` | `advisory` | `enforce` (default) | `strict`
 - `maxStopBlocks` (2), `audit` (`off` | `advisory` | `blocking`), `auditModel` (haiku), `auditTimeoutMs` (8000)
 - `exemptSkills`, `writeToolAllowlist`
-- `checkpointDir` (`.taskmaster`), `checkpointGit` (`ignore` | `commit`), `checkpointEveryWrites` (10), `contextCheckpointPercent` (70), `resumePolicy` (`offer` | `auto` | `off`), `narrativeAutoDraft` (on)
+- `checkpointDir` (`.taskmaster`), `checkpointGit` (`commit` | `ignore` | `ref`), `checkpointPush` (`off` | `milestone`), `checkpointEveryWrites` (10), `contextCheckpointPercent` (70), `resumePolicy` (`offer` | `auto` | `off`), `narrativeAutoDraft` (on)
+- `metrics` (on), `metricsDir` (`.taskmaster/metrics`), `ratingSample` (1 in 3 runs, at most once per hour), `sentimentClassifier` (off; opt-in, because it reads the user's next prompt), `metricsWebhook` (off; optional `$.http.fetch` sink)
+- `experiment` (`off` | `on`), `experimentWeights` (`baseline` / `generic` / `frontmatter`), `experimentBlind` (hide the arm label so ratings aren't biased)
+- `rca` (`manual` | `auto` | `off`), `rcaModel`, `rcaDailyCap` (5), `circuitBreakerThreshold` (3 user friction signals per session)
 
-### F13. Metrics: the go/no-go signal
-- Log every block, waiver, release, and audit finding to `$.store`, per skill.
-- **Key metric:** the *share of Stop and G1 blocks that were followed by real work*, meaning new ledger entries that satisfy the step, rather than a waiver, a release, or the user turning the mod off. If that share is low on real skills, the gates are annoying rather than helpful: stop and rethink before building more.
-- An A/B harness compares the same tasks at `observe` and at `enforce`: skipped steps, premature stops, user corrections, and token/time overhead.
+### F13. Metrics and experiments: quantify results and user experience
+
+A third-party mod can't send events to Anthropic's telemetry or to the user's OpenTelemetry collector; in this build both are reserved for the engine and built-in plugins. So the mod **owns its metrics files**. They live in the project next to the checkpoints, are committed with them (so they survive cloud containers and can be mined across clones), and are mirrored in `$.store`.
+
+**F13.1 Event log:** `.taskmaster/metrics/events-<date>-<n>.jsonl`, schema-versioned.
+- *Common fields:* `schema`, `mod_version`, the engine build (`$.session.version()`), `session_id`, `run_id`, `agent` (main or subagent), `skill_id` (name + hash), `skill_source`, **`contract_source`** (`frontmatter` | `override` | `llm` | `heuristic` | `none`), `contract_confidence`, `strictness`, **`arm`**, and `ts`.
+- *Event types:*
+  - contract built (kind, step count, confidence, extraction latency and tokens),
+  - task transition,
+  - **gate decision** (gate, decision `allow` | `warn` | `deny` | `block` | `release`, reason code, step, hook latency in ms),
+  - waiver (who: Claude or the user, plus the reason),
+  - **user intervention** (Esc within 30 s of a block, `/taskmaster off|advisory|exempt`, contract edit, resume or abandon),
+  - compaction, checkpoint, resume (with a redo count),
+  - audit call (tokens, latency, findings),
+  - turn summary (duration, `usage`),
+  - rating, incident (F15).
+- *Privacy:* no raw prompt, code, or file contents. Commands are stored as the normalized program plus a hash of the arguments, and paths are hashed relative to the repository root. Redaction runs before every write. Nothing leaves the machine unless `metricsWebhook` is set.
+
+**F13.2 Run summary:** one row per run in `runs.jsonl`.
+- **Steps:** declared, satisfied, waived (by Claude or the user), released, abandoned.
+- **Silent skips:** steps with no evidence and no waiver when the run ended. This is measurable in the `baseline` arm too, so it is the core "did the mod help" number.
+- **Blocks per gate:**
+  - *effective blocks*: followed by ledger work that satisfies the step,
+  - *friction blocks*: followed by a waiver, release, override, or `off`,
+  - **saves**: a G1 deny after which the verify step ran and *failed* or led to new edits. That is a real problem caught.
+- **Overhead:** total hook latency, extra turns caused by Stop blocks, audit and extraction tokens, and tokens spent in turns after a block.
+- **Outcome:** `completed` | `paused` | `abandoned` | `resumed-completed`.
+- **Continuity:** compactions survived, and resume correctness (satisfied steps redone).
+- **Experience:** the rating, if one was given.
+
+**F13.3 User-experience signals:**
+- *Explicit, sampled (`ratingSample`):* when a run completes or is released, the band shows one row of buttons: `helpful` · `neutral` · `got in the way`, then `too strict` · `about right` · `too loose`. It takes one click, can be dismissed, and never appears more than once an hour.
+- *Implicit:* the interventions in F13.1, and the circuit-breaker trips (F15.5).
+- *Optional (`sentimentClassifier`):* `$.model.classify` labels the user's next prompt after a block as `frustrated`, `neutral`, `positive`, or **`reports-skip`** ("you skipped the tests"). Only the label is stored. `reports-skip` is the best available measure of **misses** (false negatives), which the other metrics can't see.
+
+**F13.4 Experiment arms: comparing frontmatter against no frontmatter, and the mod against no mod.**
+- `baseline`: observe only. Metrics and checkpoints run, with no footer and no gates. This measures the natural silent-skip rate.
+- `generic`: enforce with the extracted contract, and the skill's `taskmaster:` frontmatter *ignored*.
+- `frontmatter`: enforce with the skill's `taskmaster:` frontmatter. Only skills that have it are eligible.
+- *Assignment* is per run, a deterministic hash of the `run_id` against `experimentWeights`, and is recorded on every event. `experiment: off` (the default outside evaluations) means everyone gets the configured strictness.
+- **Paired design for the frontmatter question:** pick 5–10 evaluation skills and write `taskmaster:` frontmatter for each, so the *same* skill runs with and without it. Comparing skills that happen to have frontmatter against skills that don't would mix the effect of the frontmatter with the effect of the authors who bothered to write it.
+
+**F13.5 Evaluation harness:** offline and reproducible.
+- Each evaluation skill gets a task suite of 3–5 scripted tasks with deterministic graders: tests pass, required files exist, required commands ran, required sections are present.
+- Add **trap tasks** built to tempt skipping (slow or failing tests, a tedious last step), to measure saves.
+- Run headless with `claude -p --plugin-dir <taskmaster>` in fresh worktrees, N repeats per arm, and collect the metrics files.
+- Headless runs have no user, so the harness measures effectiveness and overhead. **User experience comes from live dogfooding.**
+
+**F13.6 Mining:**
+- `/taskmaster metrics` gives an in-session summary for this project. `/taskmaster metrics export` writes one bundle (JSONL + CSV) with a data dictionary.
+- A small offline analysis script, outside the mod (DuckDB or pandas), computes the go/no-go table (§10) per arm and per `contract_source`, with bootstrap 95% confidence intervals.
 
 ### F14. Quality and packaging
 - `claude plugin validate` and `tsc -p` on every change. A `claude plugin test` suite for each gate, plus a compaction test and a cold-start test.
 - A startup self-check logs which events fired on this build, because the API is early access and changes between releases.
 - Install with `/plugin install taskmaster --marketplace <owner>/<repo>`.
+
+### F15. Self-improvement loop: canary → RCA → proposal → replay → human approval
+
+The idea is sound, but **the loop must never let the mod loosen itself.** The cheapest way to cut friction is to stop enforcing, so any automated optimizer, LLM or not, drifts there unless every change is weighed against what the mod catches. The loop therefore *detects and diagnoses* on its own, and *changes* things only with evidence and a human's yes.
+
+**F15.1 Canaries (deterministic tripwires).** Each trip writes an *incident* record with a slice of the journal around it.
+- *Friction:*
+  - a block followed by a waiver, release, or user override in the same turn,
+  - Esc within 30 s of a block,
+  - `/taskmaster off`, `advisory`, or `exempt`,
+  - a `got in the way` or `too strict` rating,
+  - a `frustrated` label,
+  - a Stop block that hit the cap,
+  - a skipped or failed hook,
+  - a gate slower than its latency budget.
+- *Misses (false negatives):*
+  - `reports-skip`,
+  - an audit finding the user confirms,
+  - a resumed run that redoes a satisfied step,
+  - a verify step that passed but the user then reports the work broken.
+- *Contract health:*
+  - low extraction confidence,
+  - **the user edited a contract.** That edit is a free, correct label for an extraction error.
+
+**F15.2 RCA with 5 whys:** generated independently, outside the user's turn.
+- **Not the working Claude, mid-task.** It would spend the user's turn, and it is a biased witness: it will tend to blame the gate. Its own first-person signal is already captured cheaply in waiver reasons.
+- Incidents queue to `.taskmaster/rca/queue/`. They're processed when the session is idle (a `$.clock.after` timer after `turn.complete`), or on demand with `/taskmaster retro`. The work is a `$.model.complete` call on `rcaModel`, capped at `rcaDailyCap`.
+- **Input:** the incident, the redacted journal slice, the contract and the relevant section of the skill, the rule that fired, and the waiver reason or the user's words. All of it is treated as data, not instructions.
+- **Output schema:**
+  ```json
+  { "summary": "...",
+    "five_whys": [{ "why": "...", "answer": "...", "evidence": ["evt_123", "evt_130"] }],
+    "category": "verify-spec-mismatch",
+    "verdict": "false_positive",
+    "proposed_fix": { "type": "contract_patch", "target": "skill:deploy@hash", "change": "...", "expected_effect": "..." },
+    "confidence": 0.7 }
+  ```
+  - **Every "why" must cite journal event ids;** an uncited answer is dropped. The chain may branch and stops at 5.
+  - `verdict` may be **`true_positive`**: the friction was the mod doing its job, because Claude really was skipping. Not all friction is bad, and the RCA has to be allowed to say so.
+- **Fixed taxonomy**, so results can be counted and not just read:
+  - *extraction:* a missing, extra, or wrong step, or a conditional step that didn't apply,
+  - *verify-spec mismatch:* a different runner (`pnpm test` vs `npm test`), a flaky check, or an environment that can't run it,
+  - wait misdetected · wrong agent attribution · gate bug · threshold too tight · ambiguous skill (an authoring issue) · user changed goal · model gaming · **true skip** · environment.
+- **Deduplicated by signature** (gate + skill + category). After 3 RCAs with the same signature, stop generating new ones and just count.
+
+**F15.3 Proposals.** They go to `.taskmaster/rca/proposals/` and are never applied automatically.
+- A per-skill contract patch, applied as a per-skill override, or a suggested `taskmaster:` frontmatter block for the skill's author.
+- Rule or threshold tuning, for example letting verify matching accept equivalent test runners.
+- A mod bug report with a reproduction (the journal slice), formatted to paste as a GitHub issue.
+- Skill-authoring feedback ("step 4 is ambiguous: it says 'verify' with no command").
+
+**F15.4 Canary validation before anything changes:**
+- **Offline replay.** The gates are deterministic functions of the ledger, so recorded journals can be replayed through a candidate rule set. The report shows the change in blocks, friction blocks, and **saves lost**. A change is promotable only if friction falls *and* saves don't fall beyond a set tolerance. This is the safeguard that keeps the loop from optimizing toward "enforce nothing."
+- **Shadow mode.** The candidate rule runs live next to the current one, logging "would have blocked" decisions without acting, for N runs.
+- **Staged rollout.** A new mod version runs as an experiment arm. It rolls back automatically if its friction rate, or any trapped session, exceeds the current version's.
+- **Human approval.** `/taskmaster proposals` lists the proposals, each with its replay result. `accept <id>` applies per-skill overrides directly. Code changes become a patch or PR for the mod's developer.
+
+**F15.5 Session circuit breaker** (the only automatic loosening, and safe):
+- If **user** friction signals in one session reach `circuitBreakerThreshold` (3), the mod drops to advisory for the rest of that session, says so once, and files an incident. The signals are overrides, `off`, Esc after a block, and `got in the way`.
+- Only the user's actions count. **Claude's own waivers never loosen the mod**, or Claude could negotiate its own leash.
+
+**F15.6 Measure the loop itself:**
+- incidents per 100 runs, by category, per mod version,
+- the mix of RCA verdicts,
+- proposals generated, accepted, and rejected,
+- the friction trend after each accepted change.
+
+If RCAs are mostly `unclear` or get rejected, scale the generator back to `manual`.
 
 ## 6. Strictness levels
 
@@ -272,6 +398,12 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 | Secrets in checkpoints | Redaction; excluded from git by default |
 | Mod bug traps the user | Stop gate fails open; `/taskmaster off` and Esc always win |
 | API drift between builds | Pin the build; startup self-check; validate in CI |
+| Self-improvement loop drifts toward "enforce nothing" | Proposals are never applied automatically; replay must show saves weren't lost; only user signals trip the circuit breaker; RCA may return `true_positive` |
+| RCA invents plausible stories | Every "why" must cite journal events; fixed taxonomy; dedupe by signature; track the accept and reject rate and scale back if it's poor |
+| Metrics leak code or prompts | No raw text stored; hashed paths and arguments; redaction; local unless `metricsWebhook` is set |
+| Rating fatigue skews UX data | Sampled 1 in 3, at most once an hour, one click; weighted against implicit signals |
+| Checkpoint commits clutter history | `--only` pathspec commits with a fixed prefix (easy to squash or filter); `ref` mode in Phase 2 |
+| Comparing frontmatter vs none is confounded | Paired design: the same skills with and without frontmatter; arms assigned per run by hash |
 
 ## 9. Build order
 
@@ -281,32 +413,96 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 3. whether the built-in task list persists across sessions,
 4. `SessionStart.source` after `/clear` and after auto-compaction,
 5. that a `classic.Stop` block makes Claude continue,
-6. how skills preloaded into subagents are attributed.
+6. how skills preloaded into subagents are attributed,
+7. that a `git commit --only -- .taskmaster/` checkpoint commit leaves the user's staged work untouched,
+8. that metrics files can be written and rolled over within the hook budget.
 
-**Phase 1: MVP (about 1–2 weeks; ~600–900 lines including checkpoints).**
+→ **Gate A (technical go/no-go, §10.1).**
+
+**Phase 1: MVP prototype (about 2 weeks; ~900–1,200 lines including checkpoints and metrics).**
 - the deterministic parse, cached Haiku extraction, and frontmatter support (F1.1–F1.7),
 - the protocol footer and task seeding,
 - the ledger (F2) and the three tools (F3),
 - G1–G3 with the F5 safety rules,
-- checkpoints and resume (F8.1–F8.6, without the fork auto-draft),
-- `/taskmaster`, the status line, the summary below the answer, and F13 logging.
+- checkpoints and resume (F8.1–F8.6, with checkpoints committed; no fork auto-draft yet),
+- `/taskmaster`, the status line, and the summary below the answer,
+- **metrics:** the event log, run summaries, and sampled ratings (F13.1–F13.3), plus **experiment arms** (F13.4),
+- **canaries:** tripwires and incident records (F15.1), the circuit breaker (F15.5), and an on-demand `/taskmaster retro` that runs RCA over the queued incidents (F15.2, manual mode).
 
-*Exit:* on 5–10 real skills, the share of blocks that led to real work is high, there's never more than 2 blocks per turn, and the compaction test and cold-start test both pass.
+**Phase 1.5: evaluation (about 2 weeks; this is the prototype trial).**
+- Write `taskmaster:` frontmatter for 5–10 evaluation skills (a mix of your own and third-party skills).
+- Build the harness task suites and trap tasks (F13.5), and run them for each arm.
+- Dogfood the mod live with `experiment: on` for at least 30 runs.
+- Run `/taskmaster retro` weekly to rank the friction sources.
 
-**Phase 2: hardening.** The Plan Gate, G4, Drift, the advisory audit, question detection, redirect handling, multiple skills and subagent ownership, the Pane, F8.5 auto-draft, F8.7 locking, the per-skill contract editor, and the full test suite.
+→ **Gate B (product go/no-go, §10.2).**
 
-**Phase 3: judgment.** A blocking audit (one bite), the verifier subagent for semantic verify specs, frontmatter constraint guards that ask the user, and the metrics view and A/B harness.
+**Phase 2: hardening.** The Plan Gate, G4, Drift, the advisory audit, question detection, redirect handling, multiple skills and subagent ownership, the Pane, F8.5 auto-draft, F8.7 locking, the per-skill contract editor, `ref` checkpoint mode, the full test suite, and automatic RCA with proposals and **replay validation** (F15.2–F15.4).
 
-**Phase 4: ship.** Marketplace packaging, docs, and an authoring guide for the `taskmaster:` frontmatter key.
+**Phase 3: judgment.** A blocking audit (one bite), the verifier subagent for semantic verify specs, frontmatter constraint guards that ask the user, shadow mode and staged rollout (F15.4), the metrics view, and loop metrics (F15.6).
 
-## 10. Definition of done for the MVP
+**Phase 4: ship.** Marketplace packaging, docs, and an authoring guide for the `taskmaster:` frontmatter key, along with a helper that drafts frontmatter for a skill from its extracted contract for the author to review.
+
+## 10. Go / no-go gates
+
+Write the thresholds down before the evaluation runs and don't move them during it. They are sensible starting points for a small sample. Report each with a bootstrap 95% confidence interval, and treat heavily overlapping intervals as "no difference."
+
+### 10.1 Gate A: after the Phase 0 spike (technical feasibility)
+
+| Check | If it fails |
+| --- | --- |
+| A `classic.Stop` `block` reliably makes Claude continue | **No-go for enforcement.** Pivot to an advisory "report card" mod (checkpoints, metrics, and a summary below each answer). |
+| `tool.call` `deny` on `TaskUpdate` and write tools is reliable on the main loop and in subagents | **No-go for G1 and the Plan Gate.** Keep only Stop-based enforcement. |
+| `$.tool.call(TaskCreate)` seeds tasks Claude sees | Fallback: the footer tells Claude to create them, and the Plan Gate enforces it. Not a no-go. |
+| Whether the built-in task list persists across sessions | Expected not to; the checkpoint rebuilds it. Not a no-go. |
+| `SessionStart.source` after `/clear` and after auto-compaction | Adapt the resume triggers. Not a no-go. |
+| Checkpoint commit with `--only` leaves the user's staged work untouched | Fallback: `ignore` plus `ref` mode. Not a no-go. |
+
+### 10.2 Gate B: after the Phase 1.5 prototype trial (product value)
+
+**Sample:** 5–10 skills, at least 3 harness runs per task per arm, and at least 30 live dogfood runs over 2 weeks or more.
+
+| Group | Metric | Threshold |
+| --- | --- | --- |
+| **Safety: all must pass** | Trapped sessions (more than `maxStopBlocks` blocks, or a gate stuck on with no way out) | **0** |
+| | Compaction tests passing | **100%** |
+| | Cold-start resumes that pick up at the right step with no satisfied step redone | **≥ 90%** |
+| | Checkpoint or work loss incidents | **0** |
+| **Effectiveness: at least 3 of 4** | Fewer silent skips than `baseline` (`generic` and `frontmatter` arms) | **≥ 50% reduction** |
+| | Effective blocks (followed by work that satisfies the step) | **≥ 60% of blocks** |
+| | Friction blocks (followed by a waiver, release, override, or `off`) | **≤ 25% of blocks** |
+| | Saves (real problems caught by G1) | **≥ 1 per 10 runs** |
+| **Cost and experience: all must pass** | Median wall-clock overhead vs `baseline` | **≤ 20%** |
+| | Median token overhead vs `baseline` | **≤ 15%** |
+| | p95 latency of deterministic hooks | **≤ 100 ms** |
+| | Live sessions where the user ran `/taskmaster off` | **≤ 10%** |
+| | Ratings `helpful` / `too strict` | **≥ 60%** / **≤ 25%** |
+
+**Universality reading** (sets direction rather than pass/fail): compare the `generic` arm with the `frontmatter` arm on the same skills.
+- If `generic` gets **≥ 70% of `frontmatter`'s reduction in silent skips**, with a friction rate no more than **10 points higher**, the universal approach is validated.
+- If it doesn't, **pivot to frontmatter-first:** enforce only skills that have frontmatter or a user-approved override, keep generic contracts advisory, and invest in the frontmatter-drafting helper (Phase 4) instead of better extraction.
+
+**Decision:**
+- **GO** to Phase 2: all safety, at least 3 of 4 effectiveness, and all cost and experience criteria pass.
+- **ITERATE:** safety passes but other criteria fall short. Run at most **2 one-week cycles**, each fixing the top 3 friction sources from `/taskmaster retro`, then re-run Gate B.
+- **NO-GO or pivot:** any of the following.
+  - Safety still fails after one fix cycle.
+  - Effective blocks are below **40%**.
+  - Friction blocks are above **40%**.
+  - `off` appears in more than **25%** of live sessions.
+  - Overhead is above **35%**.
+  - The pivots are the advisory report card, or frontmatter-only enforcement.
+
+## 11. Definition of done for the MVP prototype
 1. Load any skill with a numbered procedure. Its steps appear in the status line with no configuration, as `enforce` or `advisory` depending on confidence.
 2. Claude can't complete a step's task with no recorded work, or without meeting its `verify` spec, and can't delete a step's task. Each deny explains how to waive.
 3. Claude can't end its turn with open mandatory steps more than twice. After that, the stop goes through with a visible `released: ...` note.
 4. `await_user`, waivers, Esc, and `/taskmaster off` always win. Reference skills cause no blocks.
 5. **Compaction test:** force `/compact` mid-run. The next turn continues on the correct step without re-planning, and the checkpoint was written before compaction.
 6. **Cold-start test:** run `/clear`, or open a brand-new session on a working tree with a committed checkpoint. The session gets the briefing, and after `/taskmaster resume` it reloads the skill, rebuilds the tasks, reads `HANDOFF.md`, and finishes only the remaining or stale steps.
-7. **Go/no-go:** the F13 metric is reported for the 5–10 test skills.
+7. **Checkpoints are committed:** each milestone produces one `taskmaster: checkpoint ...` commit that contains only `.taskmaster/`.
+8. **Metrics are complete:** every gate decision, intervention, and run end produces a schema-valid event tagged with `arm` and `contract_source`. `/taskmaster metrics export` produces a bundle the analysis script turns into the §10.2 table.
+9. **Canaries work:** each tripwire in F15.1 creates an incident, and `/taskmaster retro` turns queued incidents into RCAs with evidence citations and a taxonomy category. The circuit breaker trips on 3 user friction signals and never on Claude's own waivers.
 
 ## Appendix: changes made after the advisor review
 - Reframed the promise from "works harder" to "never silently skips, never claims done without evidence, never loses its place."
@@ -318,3 +514,9 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 - Multiple contracts are capped and namespaced, ownership is tracked by `agentId`, and `isAborted` freezes the gates.
 - Added the go/no-go metric (share of blocks followed by real work) as the MVP exit criterion.
 - Scope made honest: "universal" means any skill or command, not hooks-only or MCP-only plugins.
+
+## Appendix: changes made after the second review (user)
+- Checkpoints are committed by default, via `--only` pathspec commits with a fixed prefix. Pushing is opt-in, and required in ephemeral containers.
+- F13 rewritten: the mod owns its metrics files (third-party mods can't emit to Anthropic telemetry or the OpenTelemetry collector). Events and run summaries are tagged with `arm` and `contract_source`. UX signals are explicit (sampled ratings) and implicit (interventions, optional sentiment and `reports-skip` labels). The frontmatter-vs-none question uses a paired, per-run-randomized design, plus an offline harness with trap tasks.
+- F15 added: the self-improvement loop. Canary tripwires feed incidents, then an evidence-cited RCA with 5 whys (outside the user's turn, by a separate model call), then proposals, then replay, shadow, and staged validation, then human approval. A user-only circuit breaker is the single automatic adaptation.
+- §10 added: Gate A (technical) after the spike, and Gate B (product) after a two-week prototype trial, with pre-registered thresholds, a universality reading, and GO / ITERATE / NO-GO rules.
