@@ -706,6 +706,12 @@ export const register: Register = on => {
       await log({ kind: 'tool.check.query', tool: e.tool, isReadOnly: e.isReadOnly === true, origin: next.origin.plugin })
       return verdict
     }
+    if (next.origin.plugin === PLUGIN) {
+      // The mod's own $.tool.call (TaskGet, TaskList): its tool.call hook is
+      // not run on it, so it would read as "before"; keep it out of the stats.
+      await log({ kind: 'tool.check.own', id, tool: e.tool, isReadOnly: e.isReadOnly === true })
+      return verdict
+    }
     if (openCalls.has(id)) {
       order.inside += 1
     } else {
