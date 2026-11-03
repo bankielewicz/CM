@@ -46,7 +46,13 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - A failing version lookup keeps the record under `unknown`.
     - Every observer's pass-through has its own test. The failing-store and choice tests were checked by mutation: each fails when the code it guards is removed.
   - **Finding 11, moved to P1.16.** It noted that `WATCHED` leaves out `session.measure`, `classic.UserPromptSubmit` and `classic.SessionEnd`, and that nothing reads the record yet. P1.16's status will read the record. Each later task adds the events it depends on to `WATCHED`, for example `session.measure` with P1.13's context threshold.
-  - Still open: the coverage upload result from this PR's CI, and a check in an interactive terminal.
+  - **The first coverage report** (PR #6's first CI run, on `3c7a39d`). `taskmaster` isn't exempt, so the gate wrote `coverage/cobertura-coverage.xml` (12,543 bytes) and the upload step ran for the first time.
+    - **The upload failed.** The log has `Coverage upload failed (HTTP 404): Not Found` as an error, and `Failed to send status report: HTTP Error 404`. The step and the `mod-coverage` job still passed, because `fail-on-error: false` turns upload errors into warnings. The workflow notes that uploads need Code Quality turned on, which would explain a 404; that's for the owner to check.
+    - **The ruleset's `code_coverage` rule reported nothing on the PR.** Its checks list only `mod-coverage` and `gate-guard`, so the rule had no upload to read.
+    - **No baseline from `main`.** Every earlier run on `main` was exempt and skipped the upload, and this one failed.
+
+    So the bar is enforced only by the `mod-coverage` check, as before.
+  - Still open: a check in an interactive terminal.
 - [ ] P1.0b **Delete the spike** (owner decision 3). Two PRs, in this order, and only after P1.0 is merged:
   1. **Delete `spike/`.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`scripts/mod-coverage.mjs:331`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
   2. **Remove the exemption entry.** A second PR deletes the `spike/taskmaster-spike` entry from `coverage-exempt.json`. That file is protected: Claude can't edit it (`.claude/settings.json`), and `gate-guard` fails the PR until the owner lifts that check in the ruleset for it. `main` takes no direct pushes, so this step is a PR too.
