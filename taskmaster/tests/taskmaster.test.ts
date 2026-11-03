@@ -7,8 +7,9 @@ import type { Config, WatchedEvent } from '../types'
 import { BUILD, engine, SELF_CHECK_KEY, selfCheck, start, untilSaved, untilSeen } from './engine'
 
 // Plan F12's Phase 1 keys and defaults, written out here on their own, so a
-// default changed in plugin.json or DEFAULTS fails. A key removed, added or
-// retyped in plugin.json isn't caught: a test can't read that file.
+// default changed in plugin.json or DEFAULTS fails. A key retyped in plugin.json
+// fails the test that sets every key. A key removed or added there isn't caught:
+// a test can't read that file.
 const F12: Config = {
   strictness: 'enforce',
   maxStopBlocks: 2,
@@ -335,6 +336,42 @@ test('options from settings reach the config', { options: { strictness: 'strict'
   expect(config.maxStopBlocks).toBe(3)
   expect(config.exemptSkills).toEqual(['notes'])
   expect(config.checkpointGit).toBe('commit')
+})
+
+// The kit refuses an option that doesn't fit the type plugin.json gives its key,
+// so setting every key here makes a retyped key stop the mod loading. No value is
+// the default, so each one is seen to arrive.
+const EVERY_KEY_SET: Config = {
+  strictness: 'strict',
+  maxStopBlocks: 3,
+  exemptSkills: ['notes'],
+  checkpointDir: 'state',
+  checkpointGit: 'ignore',
+  checkpointPush: 'milestone',
+  checkpointEveryWrites: 20,
+  contextCheckpointPercent: 80,
+  resumePolicy: 'auto',
+  metrics: false,
+  metricsDir: 'state/metrics',
+  ratingSample: 5,
+  experiment: 'on',
+  experimentWeights: '2/1/1',
+  experimentBlind: false,
+  rca: 'off',
+  rcaModel: 'sonnet',
+  rcaDailyCap: 7,
+  circuitBreakerThreshold: 4,
+  overrideDir: 'state/overrides',
+}
+
+test('every key set through options fits the type plugin.json gives it and reaches the config', { options: EVERY_KEY_SET }, async ($, on) => {
+  const world = engine(on)
+  await start($)
+
+  expect((await untilSeen(world, 'session.start')).config).toEqual(EVERY_KEY_SET)
+  for (const key of Object.keys(F12) as (keyof Config)[]) {
+    expect(EVERY_KEY_SET[key]).not.toEqual(F12[key])
+  }
 })
 
 test(
