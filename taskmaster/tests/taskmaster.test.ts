@@ -6,8 +6,9 @@ import { WATCHED } from '../hooks/selfcheck'
 import type { Config, WatchedEvent } from '../types'
 import { BUILD, engine, SELF_CHECK_KEY, selfCheck, start, untilSaved, untilSeen } from './engine'
 
-// Plan F12's Phase 1 keys and defaults, written out here on their own so a
-// change to either plugin.json or DEFAULTS that drifts from the plan fails.
+// Plan F12's Phase 1 keys and defaults, written out here on their own, so a
+// default changed in plugin.json or DEFAULTS fails. A key removed, added or
+// retyped in plugin.json isn't caught: a test can't read that file.
 const F12: Config = {
   strictness: 'enforce',
   maxStopBlocks: 2,
