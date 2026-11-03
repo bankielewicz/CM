@@ -1,7 +1,11 @@
 // The mod's settings (plan F12, Phase 1 keys). plugin.json's userConfig
-// declares each key with the same default; the engine fills defaults in and
-// checks types before register runs, so this is the second line: it holds
-// what the hooks read to the choices and ranges below, whatever arrives.
+// declares each key with the same default, and the engine fills defaults in
+// and checks types before register runs. plugin.json declares no min or max:
+// the engine refuses to load a module whose stored value is out of range, so
+// a typo in settings would switch the whole mod off. The ranges live here
+// instead, and parseConfig moves a value into its range. A choice key keeps
+// its plugin.json options, for the /config picker: a stored value outside
+// them reaches the module as unset, and so as the default.
 
 import type { PluginOptions } from 'claude-code'
 
@@ -20,7 +24,6 @@ export const DEFAULTS: Config = {
   metrics: true,
   metricsDir: '.taskmaster/metrics',
   ratingSample: 3,
-  sentimentClassifier: false,
   experiment: 'off',
   experimentWeights: '1/1/1',
   experimentBlind: true,
@@ -34,7 +37,7 @@ export const DEFAULTS: Config = {
 type Key = keyof Config
 
 /** The values a choice key may hold, as plugin.json's `options` list them. */
-const CHOICES: Partial<Record<Key, readonly string[]>> = {
+export const CHOICES: Partial<Record<Key, readonly string[]>> = {
   strictness: ['observe', 'advisory', 'enforce', 'strict'],
   checkpointGit: ['commit', 'ignore'],
   checkpointPush: ['off', 'milestone'],
@@ -62,13 +65,34 @@ export function parseConfig(options: PluginOptions): Config {
   return config as Config
 }
 
+/** Keys naming a folder inside the project, which later tasks write to and commit. */
+const FOLDERS: readonly Key[] = ['checkpointDir', 'metricsDir', 'overrideDir']
+
 function pick(key: Key, value: unknown): unknown {
   const fallback = DEFAULTS[key]
-  if (Array.isArray(fallback)) return names(value) ?? fallback
+  if (Array.isArray(fallback)) return names(value) ?? [...fallback]
   if (typeof value !== typeof fallback) return fallback
   if (typeof value === 'number') return clamp(value, RANGES[key], fallback as number)
-  if (typeof value === 'string') return choose(value.trim(), CHOICES[key], fallback as string)
-  return value
+  if (typeof value !== 'string') return value
+  const text = value.trim()
+  if (FOLDERS.includes(key)) return folder(text) ?? fallback
+  if (key === 'experimentWeights') return weights(text) ?? fallback
+  return choose(text, CHOICES[key], fallback as string)
+}
+
+/** A folder relative to the project root, tidied; undefined for one that leaves it, or is the root itself. */
+function folder(path: string): string | undefined {
+  if (/^([/\\~]|[A-Za-z]:)/.test(path)) return undefined
+  const parts = path.split(/[/\\]+/).filter(part => part !== '' && part !== '.')
+  if (parts.length === 0 || parts.includes('..')) return undefined
+  return parts.join('/')
+}
+
+/** Three non-negative numbers, baseline/generic/frontmatter, not all zero. */
+function weights(text: string): string | undefined {
+  const parts = text.split('/')
+  if (parts.length !== 3 || !parts.every(part => /^\d+(\.\d+)?$/.test(part))) return undefined
+  return parts.some(part => Number(part) > 0) ? text : undefined
 }
 
 function names(value: unknown): string[] | undefined {

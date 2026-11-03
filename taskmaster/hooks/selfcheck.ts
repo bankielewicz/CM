@@ -1,12 +1,18 @@
 // The startup self-check (plan F14). The mod API is early access and changes
 // between builds, so the mod records which of the events it depends on fire
-// on this build. It keeps one record per build in $.store, adding the events
-// each session sees. It's diagnostic only: a store that fails costs the
-// record and nothing else.
+// on this build. It keeps one record per build in $.store, which every
+// session on this machine shares, and adds the events each session sees.
+//
+// It's diagnostic only, so it never holds an event up: note() returns at
+// once, and saves run afterwards, one at a time. Each save reads the stored
+// record and merges it before writing, so it keeps what other sessions saved
+// meanwhile. A save whose read fails writes nothing, so a broken read can't
+// replace the history with this session's events alone. (Two sessions that
+// save in the same instant can still race; the store has no compare-and-set.)
 
 import type { Config, Io, SelfCheckRecord, WatchedEvent } from '../types'
 
-export const WATCHED: readonly WatchedEvent[] = [
+export const WATCHED = [
   'agent.spawn',
   'classic.PostCompact',
   'classic.PreCompact',
@@ -22,11 +28,17 @@ export const WATCHED: readonly WatchedEvent[] = [
   'tool.check',
   'turn.complete',
   'turn.start',
-]
+] as const satisfies readonly WatchedEvent[]
+
+// Fails the typecheck if WatchedEvent names an event WATCHED leaves out.
+export const WATCHES_EVERY_EVENT: [Exclude<WatchedEvent, (typeof WATCHED)[number]>] extends [never] ? true : never = true
+
+/** The build name the record is kept under when the engine can't say which build this is. */
+export const UNKNOWN_BUILD = 'unknown'
 
 export const selfCheckKey = (build: string): string => `self-check/${build}`
 
-const isWatched = (name: unknown): name is WatchedEvent => WATCHED.includes(name as WatchedEvent)
+const isWatched = (name: unknown): name is WatchedEvent => (WATCHED as readonly unknown[]).includes(name)
 
 /** The events a stored record lists, if it's a record of this schema for this build. */
 export function storedEvents(value: unknown, build: string): WatchedEvent[] {
@@ -42,32 +54,57 @@ export class SelfCheck {
   private readonly seen = new Set<WatchedEvent>()
   // Unset until session.start: events noted before it wait in `seen`.
   private started: Started | undefined
+  // The save in flight, and whether another must follow it.
+  private saving: Promise<void> | undefined
+  private again = false
 
-  /** Notes an event, and saves the record the first time this session sees it. */
-  async note(event: WatchedEvent): Promise<void> {
+  /** Notes an event. The first time this session sees it, a save is queued. */
+  note(event: WatchedEvent): void {
     if (this.seen.has(event)) return
     this.seen.add(event)
-    if (this.started) await this.save(this.started)
+    this.queue()
   }
 
-  /** At session.start: merges what earlier sessions saw on this build, then saves, flushing what was buffered. */
-  async start(io: Io, build: string, config: Config): Promise<void> {
-    const started = { io, build, config }
-    this.started = started
-    try {
-      for (const event of storedEvents(await io.storeGet(selfCheckKey(build)), build)) this.seen.add(event)
-    } catch {
-      // Diagnostic only: start from this session's events.
+  /** At session.start: from here on events are saved, starting with the ones noted before it. */
+  start(io: Io, build: string, config: Config): void {
+    this.started = { io, build, config }
+    this.queue()
+  }
+
+  // One save at a time. A note made while one runs asks for one more, which
+  // runs after it and saves the latest events.
+  private queue(): void {
+    const started = this.started
+    if (!started) return
+    if (this.saving) {
+      this.again = true
+      return
     }
-    await this.save(started)
+    this.saving = (async () => {
+      do {
+        this.again = false
+        await this.save(started)
+      } while (this.again)
+      this.saving = undefined
+    })()
   }
 
   private async save({ io, build, config }: Started): Promise<void> {
+    const key = selfCheckKey(build)
+    let stored: unknown
+    try {
+      stored = await io.storeGet(key)
+    } catch {
+      // Without the stored record a write would drop what other sessions saw,
+      // so write nothing. The next new event tries again.
+      return
+    }
+    for (const event of storedEvents(stored, build)) this.seen.add(event)
     try {
       const record: SelfCheckRecord = { schema: 1, build, seen: [...this.seen].sort(), config, updatedAt: await io.now() }
-      await io.storeSet(selfCheckKey(build), record)
+      await io.storeSet(key, record)
     } catch {
-      // Diagnostic only: the record is lost, every event still passes through.
+      // This write is lost; the next new event's save carries the same events.
     }
   }
 }

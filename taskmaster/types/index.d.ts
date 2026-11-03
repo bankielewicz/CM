@@ -19,7 +19,6 @@ export type Config = {
   metrics: boolean
   metricsDir: string
   ratingSample: number
-  sentimentClassifier: boolean
   experiment: 'off' | 'on'
   experimentWeights: string
   experimentBlind: boolean

@@ -51,9 +51,9 @@ How the bar is enforced:
 
 - `hooks/register.tsx` registers every hook. At `session.start` it builds the `Io` table (`types/index.d.ts`), the engine calls helpers get in place of `$`.
 - `hooks/config.ts` holds `DEFAULTS` (plan F12's Phase 1 keys) and `parseConfig`. That function holds what `register(on, options)` receives to each key's choices and range. `plugin.json`'s `userConfig` declares the same defaults, and a test checks both against F12.
-- `hooks/selfcheck.ts` is the startup self-check (F14). It keeps one record per Claude Code build in `$.store`, under `self-check/<build>`, listing which of the events in `WATCHED` have fired there, and the settings in force.
+- `hooks/selfcheck.ts` is the startup self-check (F14). It keeps one record per Claude Code build in `$.store`, under `self-check/<build>`, listing which of the events in `WATCHED` have fired there, and the settings in force. `note()` returns at once. Saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
 - `types/index.d.ts` holds the mod's own types.
-- `tests/engine.ts` is the engine beneath the mod in tests: `engine(on)` answers each `$` call, and returns what the mod stored and showed.
+- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
 
 ## Spike architecture
 
@@ -76,6 +76,9 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 - Anchor `.taskmaster/` paths to `$.session.root()`. Relative `$.fs` paths follow the working directory, which a shell `cd` moves.
 - A mod's own `tool.check` hook doesn't run on its own `$.tool.check` query, so read `isReadOnly` from the real call's `tool.check`.
 - The engine's helper agents also raise `SubagentStop`. Gate only agents seen through `agent.spawn`, and read a subagent's answer from `turn.complete`.
+- A hook passed to `on` must be a function literal, or the name of one. A call that returns a hook, such as `on('x', observe('x'))`, stops the module loading.
+- Declare no `min` or `max` on a `userConfig` number. The engine refuses to load the module when a stored value is outside them, which switches the whole mod off. Clamp in `parseConfig` instead. A string outside its `options` arrives as unset, so `options` are safe to keep for the `/config` picker.
+- Don't make a hook wait on `$.store` or other diagnostics: note the work and return `next(e)`, and save afterwards.
 
 ## Where the work stands
 
@@ -84,7 +87,7 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 - `.taskmaster/spike/` isn't committed, so anything Gate A needs goes into plan §10.1. New spike learnings go into plan §9, and behaviour changes into `RUNBOOK.md`.
 - The default branch is protected and nobody can bypass the ruleset, so every change lands through a PR, including where `GATE-A-TASKS.md` says to push.
 - The spike predates the coverage bar and is exempt in `coverage-exempt.json`, at 61.58% (`hooks/register.tsx` 57.14%). Its tests must still pass. Gate A has closed, so retire the spike as `docs/phase-1-tasks.md` P1.0b says, in this order:
-  1. Land the first real mod. With no mods at all the gate fails, which blocks every merge.
+  1. Land the first real mod: `taskmaster/`, in PR #6. With no mods at all the gate fails, which blocks every merge.
   2. A PR deletes `spike/`. The gate ignores the leftover entry.
   3. A second PR removes the entry, with the owner lifting `gate-guard` for it.
 

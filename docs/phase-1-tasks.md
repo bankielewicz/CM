@@ -24,6 +24,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
 1. **Resume without the Plan Gate (P1.15).** F8.6 has the Plan Gate make a resumed run reload the skill, rebuild its tasks and read `HANDOFF.md` before any write, and Phase 1 has no Plan Gate. So `/taskmaster resume` reloads the skill and rebuilds the tasks itself, and G3 holds the stop until `HANDOFF.md` has been read.
 2. **Legitimate waits (P1.10, P1.17).** Phase 1 recognises a wait from `taskmaster_await_user`, or from a trailing "?" on the last message (F5's fast pre-check). A stop that a trailing "?" lets through is listed in the summary below the answer, so a question can't hide a skipped step. The `$.model.classify` fallback arrives with Phase 2's question detection.
 3. **The spike (P1.0b).** Delete it, in the two PRs and the order P1.0b gives.
+4. **`sentimentClassifier` waits** (PR #6 review). It's F13.3's optional label of your next prompt after a block. No Phase 1 task builds it, and a privacy setting that does nothing would mislead, so it isn't a setting yet. It comes back with the task that builds it.
 
 ## M0. Scaffold
 - [ ] P1.0 **Scaffold the mod** (F12, F14). Create `taskmaster/.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`, `types/` and `tests/`, with a test `engine()` helper like the spike's. Add the Phase 1 keys of `userConfig` (F12). At `session.start`, build the `Io` table and flush buffered early events. A startup self-check logs which events fired on this build (F14).
@@ -36,8 +37,15 @@ Report the commands with their output. `main` is protected, so each task (or a s
   **Red:** loading the mod registers `session.start`, and the self-check records the events it saw. The config defaults match F12. **Done:** coverage ≥ 95%, validate and typecheck pass, and the mod loads in a terminal with nothing visible.
 
   **Status (2026-11-03):**
-  - The mod is built: 16 tests pass, coverage is 100% of lines (94/94) and functions (32/32), and validate and the typecheck pass.
-  - A headless `claude -p --plugin-dir ./taskmaster` run loaded it with every option at its default. It saved `self-check/2.1.317` at `session.start` and as each new event fired, no hook failed, and it showed nothing.
+  - The mod is built: 41 tests pass, coverage is 100% of lines (95/95) and functions (40/40), and validate and the typecheck pass.
+  - A headless `claude -p --plugin-dir ./taskmaster` run loaded it and saved `self-check/2.1.317`, and no hook failed. With `maxStopBlocks: 99` and `checkpointDir: "/"` in its settings it still loaded: the original manifest refused the same settings with "hooks module did not load".
+  - **Review fixes** (PR #6's review, findings 1–10 and 12–14):
+    - An out-of-range setting no longer stops the mod loading: `plugin.json` declares no `min`/`max`, and `parseConfig` clamps instead.
+    - Folder settings outside the project and all-zero experiment weights are refused.
+    - The self-check never holds up an event. Its saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
+    - A failing version lookup keeps the record under `unknown`.
+    - Every observer's pass-through has its own test. The failing-store and choice tests were checked by mutation: each fails when the code it guards is removed.
+  - **Finding 11, moved to P1.16.** It noted that `WATCHED` leaves out `session.measure`, `classic.UserPromptSubmit` and `classic.SessionEnd`, and that nothing reads the record yet. P1.16's status will read the record. Each later task adds the events it depends on to `WATCHED`, for example `session.measure` with P1.13's context threshold.
   - Still open: the coverage upload result from this PR's CI, and a check in an interactive terminal.
 - [ ] P1.0b **Delete the spike** (owner decision 3). Two PRs, in this order, and only after P1.0 is merged:
   1. **Delete `spike/`.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`scripts/mod-coverage.mjs:331`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
@@ -130,7 +138,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   *Depends on P1.12. DoD 6.*
 
 ## M5. Control and visibility (F9, F11)
-- [ ] P1.16 **`/taskmaster` command** (F9). Status, `off | advisory | enforce | strict`, `waive <step> <reason>`, `contract show <skill>`, `checkpoint`, `runs`, `resume [run]`, `abandon [run]`, `report` and `exempt <skill>`. **Red:** a test of each subcommand's effect on state. *Depends on P1.11 and P1.15.*
+- [ ] P1.16 **`/taskmaster` command** (F9). Status (including the self-check record for this build: which watched events fired, from P1.0), `off | advisory | enforce | strict`, `waive <step> <reason>`, `contract show <skill>`, `checkpoint`, `runs`, `resume [run]`, `abandon [run]`, `report` and `exempt <skill>`. **Red:** a test of each subcommand's effect on state. *Depends on P1.11 and P1.15.*
 - [ ] P1.17 **Status line, band, toasts, and the summary below the answer** (F11).
   - **Status line:** `skill · 3/7 · 1 waived`.
   - **Toasts:** shown on blocks.

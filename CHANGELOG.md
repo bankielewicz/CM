@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added the MIT License.
 - Added a `gate-guard` check that fails a pull request changing the coverage gate's own files, and Claude Code deny rules for those files and for `gh pr merge`.
 - Added the Phase 1 task list, `docs/phase-1-tasks.md`: 28 test-first tasks in build order.
-- Added the `taskmaster` mod's scaffold (P1.0). It reads the Phase 1 settings and runs a startup self-check, which records in `$.store` which of the events it needs fire on each Claude Code build. It's observe-only and shows nothing.
+- Added the `taskmaster` mod's scaffold (P1.0). It reads the Phase 1 settings and runs a startup self-check, which records in `$.store` which of the events it needs fire on each Claude Code build. It's observe-only and shows nothing. A setting outside its range is moved into the range, so it can't switch the mod off.
 
 ### Changed
 

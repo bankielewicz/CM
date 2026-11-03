@@ -2,7 +2,9 @@
   "name": "taskmaster",
   "version": "0.1.0",
   "description": "Holds Claude to the workflow of the skill it loads: no silently skipped step, no completion without evidence, no lost place across compaction or a new session.",
-  "author": { "name": "bankielewicz" },
+  "author": {
+    "name": "bankielewicz"
+  },
   "license": "MIT",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -11,15 +13,18 @@
       "title": "Strictness",
       "description": "How hard the gates hold: observe logs only, advisory warns, enforce denies and blocks, strict also needs your yes for a waiver.",
       "default": "enforce",
-      "options": ["observe", "advisory", "enforce", "strict"]
+      "options": [
+        "observe",
+        "advisory",
+        "enforce",
+        "strict"
+      ]
     },
     "maxStopBlocks": {
       "type": "number",
       "title": "Stop blocks per turn",
-      "description": "How many times the Stop gate may hold one contract in a turn before it lets the stop through with a note.",
-      "default": 2,
-      "min": 1,
-      "max": 5
+      "description": "How many times the Stop gate may hold one contract in a turn before it lets the stop through with a note. 1 to 5; anything else is moved into that range.",
+      "default": 2
     },
     "exemptSkills": {
       "type": "string",
@@ -31,7 +36,7 @@
     "checkpointDir": {
       "type": "string",
       "title": "Checkpoint folder",
-      "description": "Where checkpoints are kept, relative to the project root.",
+      "description": "Where checkpoints are kept, relative to the project root. A path outside the project is refused.",
       "default": ".taskmaster"
     },
     "checkpointGit": {
@@ -39,37 +44,43 @@
       "title": "Checkpoints in git",
       "description": "commit: commit the checkpoint folder alone at each milestone. ignore: keep it out of git.",
       "default": "commit",
-      "options": ["commit", "ignore"]
+      "options": [
+        "commit",
+        "ignore"
+      ]
     },
     "checkpointPush": {
       "type": "string",
       "title": "Push checkpoints",
       "description": "milestone: push each checkpoint commit, which a cloud container needs for it to outlive the session.",
       "default": "off",
-      "options": ["off", "milestone"]
+      "options": [
+        "off",
+        "milestone"
+      ]
     },
     "checkpointEveryWrites": {
       "type": "number",
       "title": "Checkpoint every N writes",
-      "description": "Also write a checkpoint after this many write calls.",
-      "default": 10,
-      "min": 1,
-      "max": 1000
+      "description": "Also write a checkpoint after this many write calls. 1 to 1000.",
+      "default": 10
     },
     "contextCheckpointPercent": {
       "type": "number",
       "title": "Checkpoint at context %",
-      "description": "Ask for a checkpoint when the context window is this full.",
-      "default": 70,
-      "min": 10,
-      "max": 95
+      "description": "Ask for a checkpoint when the context window is this full. 10 to 95.",
+      "default": 70
     },
     "resumePolicy": {
       "type": "string",
       "title": "Resume",
       "description": "What a new session does with an unfinished run: offer it, resume it, or stay quiet.",
       "default": "offer",
-      "options": ["offer", "auto", "off"]
+      "options": [
+        "offer",
+        "auto",
+        "off"
+      ]
     },
     "metrics": {
       "type": "boolean",
@@ -80,34 +91,29 @@
     "metricsDir": {
       "type": "string",
       "title": "Metrics folder",
-      "description": "Where metrics are kept, relative to the project root.",
+      "description": "Where metrics are kept, relative to the project root. A path outside the project is refused.",
       "default": ".taskmaster/metrics"
     },
     "ratingSample": {
       "type": "number",
       "title": "Ask for a rating in 1 of N runs",
-      "description": "At most once an hour. 0 never asks.",
-      "default": 3,
-      "min": 0,
-      "max": 100
-    },
-    "sentimentClassifier": {
-      "type": "boolean",
-      "title": "Label your next prompt after a block",
-      "description": "Off by default, because it reads your next prompt. Only the label is stored.",
-      "default": false
+      "description": "At most once an hour. 0 never asks; 100 at most.",
+      "default": 3
     },
     "experiment": {
       "type": "string",
       "title": "Experiment",
       "description": "on assigns each run an arm (baseline, generic or frontmatter), for evaluations.",
       "default": "off",
-      "options": ["off", "on"]
+      "options": [
+        "off",
+        "on"
+      ]
     },
     "experimentWeights": {
       "type": "string",
       "title": "Experiment weights",
-      "description": "Relative weights of the baseline, generic and frontmatter arms.",
+      "description": "Relative weights of the baseline, generic and frontmatter arms, as three numbers like 2/1/1, not all zero.",
       "default": "1/1/1"
     },
     "experimentBlind": {
@@ -121,7 +127,10 @@
       "title": "Root-cause analysis",
       "description": "manual: run /taskmaster retro to analyse queued incidents. off: queue nothing.",
       "default": "manual",
-      "options": ["manual", "off"]
+      "options": [
+        "manual",
+        "off"
+      ]
     },
     "rcaModel": {
       "type": "string",
@@ -132,23 +141,19 @@
     "rcaDailyCap": {
       "type": "number",
       "title": "Root-cause analyses per day",
-      "description": "At most this many model calls a day for /taskmaster retro.",
-      "default": 5,
-      "min": 0,
-      "max": 50
+      "description": "At most this many model calls a day for /taskmaster retro. 0 to 50.",
+      "default": 5
     },
     "circuitBreakerThreshold": {
       "type": "number",
       "title": "Friction signals before advisory",
-      "description": "After this many of your overrides in one session, the mod drops to advisory for the rest of it.",
-      "default": 3,
-      "min": 1,
-      "max": 20
+      "description": "After this many of your overrides in one session, the mod drops to advisory for the rest of it. 1 to 20.",
+      "default": 3
     },
     "overrideDir": {
       "type": "string",
       "title": "Override folder",
-      "description": "Where per-skill contract overrides are kept, relative to the project root.",
+      "description": "Where per-skill contract overrides are kept, relative to the project root. A path outside the project is refused.",
       "default": ".taskmaster/overrides"
     }
   }
