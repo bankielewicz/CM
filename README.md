@@ -95,7 +95,7 @@ A skill's steps become tasks. Taskmaster records what happens, checks that recor
 | Stage | What it holds | State |
 | --- | --- | --- |
 | Phase 0: spike | An observe-only mod with one-shot probes that tests whether the design can work | Built. Gate A passed (GO, 2026-11-03) |
-| Phase 1: first version | Steps from the skill, the evidence record, gates on completing or deleting a task and on stopping, recorded skips, checkpoints and resume, the status line and summary, metrics, and the frontmatter advisor for one skill | Planned, and next ([task list](docs/phase-1-tasks.md)) |
+| Phase 1: first version | Steps from the skill, the evidence record, gates on completing or deleting a task and on stopping, recorded skips, checkpoints and resume, the status line and summary, metrics, and the frontmatter advisor for one skill | In progress: the scaffold is built ([task list](docs/phase-1-tasks.md)) |
 | Phase 2 onward | Holding Claude to a plan before it writes, subagent enforcement, warnings for unrequested work, an advisory audit, a side pane, and marketplace install | Planned |
 
 The thresholds in the design plan are targets for a later trial, not results.

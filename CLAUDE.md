@@ -4,19 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Taskmaster is a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. `docs/taskmaster-plan.md` is the design. The real mod doesn't exist yet. The only code is `spike/taskmaster-spike/`, the Phase 0 spike: an observe-only mod with one-shot probes that answers the Gate A feasibility checks (plan §10.1). It builds no enforcement, so don't add gates to it.
+Taskmaster is a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. `docs/taskmaster-plan.md` is the design, and `docs/phase-1-tasks.md` is the build order. The mod is `taskmaster/`, built test-first one task at a time. So far it's the P1.0 scaffold: it reads its settings and runs a startup self-check, and every hook passes its event on unchanged. `spike/taskmaster-spike/` is the Phase 0 spike, an observe-only mod with one-shot probes that answered the Gate A checks (plan §10.1). It's due for deletion (P1.0b), so don't add to it.
 
 ## Commands
 
 Run from the repo root. The `claude` CLI loads, validates and tests a mod. npm holds only the coverage tooling, so run `npm ci` once.
 
 ```sh
-claude plugin test spike/taskmaster-spike         # one mod's tests, about 1 s
+claude plugin test taskmaster                     # one mod's tests, about 1 s
 npm run coverage                                  # every mod; exits 1 under 95% line or function coverage. Also takes mod folders
 npm test                                          # the coverage gate's own tests
-claude plugin validate spike/taskmaster-spike     # README-install and plugin-directory advice is expected
-npx -y -p typescript@5.6 tsc -p spike/taskmaster-spike   # needs the engine-written types (see below)
-claude --plugin-dir ./spike/taskmaster-spike      # load it; from a terminal, the flag hot-reloads on edit
+claude plugin validate taskmaster                 # the icon and plugin-directory advice is expected
+npx -y -p typescript@5.6 tsc -p taskmaster        # needs the engine-written types (see below)
+claude --plugin-dir ./taskmaster                  # load it; from a terminal, the flag hot-reloads on edit
 ```
 
 - **Single test:** not supported. `claude plugin test` takes only a folder and runs every `*.test.ts(x)` under it, and the kit from `claude-code/testing` has no `test.only`, so a test file using it fails to load.
@@ -46,6 +46,14 @@ How the bar is enforced:
 - `gate-guard` (`.github/workflows/gate-guard.yml`, `scripts/gate-guard.mjs`) fails any PR that changes the gate's own files, dependency updates included. It runs from the base branch through `pull_request_target`, so it must never check out or run PR code. To change one of those files, the owner lifts the check in the ruleset.
 - `.claude/settings.json` denies Claude edits to the same files and `gh pr merge`, and a test keeps its list in step with `PROTECTED` in `scripts/gate-guard.mjs`. If one of those files needs changing, give the owner the exact edit; don't look for another way to write it.
 - The 95 lives in `THRESHOLD` in `scripts/mod-coverage.mjs` and in the GitHub ruleset, so change them together. The ruleset reads lines only, so only the `mod-coverage` check holds functions to it. Line coverage alone isn't enough, because loading a file runs every line of its one-line functions. Branch coverage is printed but not required. If the bar can't be met, ask; don't lower it or exclude files.
+
+## Mod architecture
+
+- `hooks/register.tsx` registers every hook. At `session.start` it builds the `Io` table (`types/index.d.ts`), the engine calls helpers get in place of `$`.
+- `hooks/config.ts` holds `DEFAULTS` (plan F12's Phase 1 keys) and `parseConfig`. That function holds what `register(on, options)` receives to each key's choices and range. `plugin.json`'s `userConfig` declares the same defaults, and a test checks both against F12.
+- `hooks/selfcheck.ts` is the startup self-check (F14). It keeps one record per Claude Code build in `$.store`, under `self-check/<build>`, listing which of the events in `WATCHED` have fired there, and the settings in force.
+- `types/index.d.ts` holds the mod's own types.
+- `tests/engine.ts` is the engine beneath the mod in tests: `engine(on)` answers each `$` call, and returns what the mod stored and showed.
 
 ## Spike architecture
 
