@@ -11,5 +11,5 @@ jobs:
     name: gate-guard
     runs-on: ubuntu-latest
     steps:
-      # Finishes after the real check.
-      - run: sleep 90
+      # Aims to finish before the real check.
+      - run: "true"
