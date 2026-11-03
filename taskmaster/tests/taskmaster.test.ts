@@ -214,6 +214,27 @@ test('a failing version lookup still runs the self-check, under the build "unkno
   expect(record.build).toBe('unknown')
 })
 
+// The self-check exists to catch a build changing the mod API, so it can't
+// trust the shape of this answer.
+const UNUSABLE_VERSIONS: Record<string, unknown> = {
+  'no version': { base: BUILD },
+  'an empty version': { version: '' },
+  'a blank version': { version: '  ' },
+  'a version that is not text': { version: 2 },
+  'nothing': null,
+}
+for (const [name, answer] of Object.entries(UNUSABLE_VERSIONS)) {
+  test(`a lookup answering ${name} keeps the record under the build "unknown"`, { timeoutMs: 3_000 }, async ($, on) => {
+    const world = engine(on, { versionAnswer: answer })
+    const wrote = new Promise<void>(resolve => world.onWrite.push(resolve))
+    await start($)
+    await wrote
+
+    expect(world.writes).toEqual(['self-check/unknown'])
+    expect(selfCheck(world, 'self-check/unknown')?.build).toBe('unknown')
+  })
+}
+
 test('a save in flight when session.start fires again saves next under the new build', { timeoutMs: 3_000 }, async ($, on) => {
   const world = engine(on, { holdFirstWrite: true, failVersions: 1 })
   await start($)

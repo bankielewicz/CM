@@ -39,6 +39,8 @@ export type EngineOptions = {
   hangVersion?: boolean
   /** This many `$.session.version()` calls fail first. */
   failVersions?: number
+  /** What `$.session.version()` answers in place of this build's, whatever its shape. */
+  versionAnswer?: unknown
   /** The engine's own `session.start` throws, after noting it was reached. */
   failStart?: boolean
 }
@@ -74,6 +76,7 @@ export function engine(on: On, options: EngineOptions = {}): World {
       failVersions -= 1
       throw new Error('version unavailable')
     }
+    if ('versionAnswer' in options) return { value: options.versionAnswer as never }
     return { value: { version: BUILD, base: BUILD, builtAt: '2026-01-01T00:00:00Z' } }
   })
   on('store.get', (_, e) => {
