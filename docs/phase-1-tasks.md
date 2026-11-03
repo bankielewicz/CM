@@ -37,7 +37,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   **Red:** loading the mod registers `session.start`, and the self-check records the events it saw. The config defaults match F12. **Done:** coverage ≥ 95%, validate and typecheck pass, and the mod loads in a terminal with nothing visible.
 
   **Status (2026-11-03):**
-  - The mod is built: 51 tests pass, coverage is 100% of lines (97/97) and functions (44/44), and validate and the typecheck pass.
+  - The mod is built: 52 tests pass, coverage is 100% of lines (97/97) and functions (44/44), and validate and the typecheck pass.
   - A headless `claude -p --plugin-dir ./taskmaster` run loaded it and saved `self-check/2.1.317`, and no hook failed. With `maxStopBlocks: 99` and `checkpointDir: "/"` in its settings it still loaded: the original manifest refused the same settings with "hooks module did not load".
   - **Review fixes** (PR #6's review, findings 1–10 and 12–14):
     - An out-of-range setting no longer stops the mod loading: `plugin.json` declares no `min`/`max`, and `parseConfig` clamps instead.
@@ -56,8 +56,9 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - **Third review round** (`/code-review` of `e94578f`):
     - An unusable version answer keeps the record under `unknown`, not a key like `self-check/undefined`.
     - `plugin.json` and the plan no longer say metrics stay on the machine: by default they're committed with the checkpoints, so a push publishes them.
-    - **Open, for the owner:** no test can read `plugin.json`, because a kit test can't read a file. A changed default, a removed option and an added `min` or `max` are caught anyway; a removed key, an added key and a changed type aren't.
-    - **Open, for the owner:** whether a `session.end` save survives the process exiting. No session that loaded the mod has exited yet.
+    - **`plugin.json` drift:** a kit test can't read a file, so no test compares it with `DEFAULTS`. A changed default, a removed option and an added `min` or `max` are caught anyway, and a new test that sets every key catches a retyped key. A one-off comparison found no drift in any of the 20 keys.
+    - **Deferred (owner's decision):** a key removed from or added to `plugin.json` stays uncaught. The harm is small, a setting missing from `/config` or one that does nothing, and both show in the `plugin.json` diff.
+    - **`session.end` at exit:** the save survived one normal exit. The hook settled, the save followed 7 ms later, and the record lists the event. A hard kill wasn't tried.
   - **Finding 11, moved to P1.16.** It noted that `WATCHED` leaves out `session.measure`, `classic.UserPromptSubmit` and `classic.SessionEnd`, and that nothing reads the record yet. P1.16's status will read the record. Each later task adds the events it depends on to `WATCHED`, for example `session.measure` with P1.13's context threshold.
   - **The first coverage report** (PR #6's first CI run, on `3c7a39d`). `taskmaster` isn't exempt, so the gate wrote `coverage/cobertura-coverage.xml` (12,543 bytes) and the upload step ran for the first time.
     - **The upload failed.** The log has `Coverage upload failed (HTTP 404): Not Found` as an error, and `Failed to send status report: HTTP Error 404`. The step and the `mod-coverage` job still passed, because `fail-on-error: false` turns upload errors into warnings. The workflow notes that uploads need Code Quality turned on, which would explain a 404; that's for the owner to check.
@@ -65,7 +66,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - **No baseline from `main`.** Every earlier run on `main` was exempt and skipped the upload, and this one failed.
 
     So the bar is enforced only by the `mod-coverage` check, as before.
-  - Still open: a check in an interactive terminal.
+  - Checked in an interactive terminal (2026-11-03): loaded with `claude --debug --plugin-dir`, hot reloads and an exit worked, the debug logs show no failed hook, and the owner saw nothing from the mod.
 - [ ] P1.0b **Delete the spike** (owner decision 3). Two PRs, in this order, and only after P1.0 is merged:
   1. **Delete `spike/`.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`scripts/mod-coverage.mjs:331`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
   2. **Remove the exemption entry.** A second PR deletes the `spike/taskmaster-spike` entry from `coverage-exempt.json`. That file is protected: Claude can't edit it (`.claude/settings.json`), and `gate-guard` fails the PR until the owner lifts that check in the ruleset for it. `main` takes no direct pushes, so this step is a PR too.
