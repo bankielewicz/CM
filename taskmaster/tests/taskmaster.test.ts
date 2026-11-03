@@ -244,6 +244,16 @@ test('a hung store holds up no event', { timeoutMs: 3_000 }, async ($, on) => {
   expect(world.writes).toEqual([])
 })
 
+test('a hung version lookup holds up no event', { timeoutMs: 3_000 }, async ($, on) => {
+  const world = engine(on, { hangVersion: true })
+  await start($)
+  const answers = await raiseEveryEvent($)
+
+  expect(answers.tool.result).toEqual({ text: 'engine result' })
+  expect(answers.end.sessionId).toBe('engine-session')
+  expect(world.writes).toEqual([])
+})
+
 test('the scaffold shows nothing: no status line or toast', async ($, on) => {
   const world = engine(on)
   await $.classic.SessionStart({ source: 'startup' })

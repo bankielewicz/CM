@@ -35,6 +35,12 @@ export type EngineOptions = {
   holdFirstWrite?: boolean
   /** `$.session.version()` fails. */
   versionFails?: boolean
+  /** `$.session.version()` never answers, as a hung engine would. */
+  hangVersion?: boolean
+  /** This many `$.session.version()` calls fail first. */
+  failVersions?: number
+  /** The engine's own `session.start` throws, after noting it was reached. */
+  failStart?: boolean
 }
 
 // Nothing sits beneath the plugin in a test: these hooks stand for the
@@ -42,6 +48,7 @@ export type EngineOptions = {
 export function engine(on: On, options: EngineOptions = {}): World {
   let failGets = options.failGets ?? 0
   let failSets = options.failSets ?? 0
+  let failVersions = options.failVersions ?? 0
   let held = options.holdFirstWrite ?? false
   let release: () => void = () => {}
   const released = new Promise<void>(resolve => {
@@ -60,8 +67,13 @@ export function engine(on: On, options: EngineOptions = {}): World {
   }
 
   mock.clock(on, { now: 1_000 })
-  on('session.version', () => {
+  on('session.version', async () => {
+    if (options.hangVersion) await new Promise<never>(() => {})
     if (options.versionFails) throw new Error('version unavailable')
+    if (failVersions > 0) {
+      failVersions -= 1
+      throw new Error('version unavailable')
+    }
     return { value: { version: BUILD, base: BUILD, builtAt: '2026-01-01T00:00:00Z' } }
   })
   on('store.get', (_, e) => {
@@ -98,6 +110,7 @@ export function engine(on: On, options: EngineOptions = {}): World {
   // The engine's own answers to the watched events, each noting it was reached.
   on('session.start', (_, e) => {
     reach('session.start')
+    if (options.failStart) throw new Error('session.start failed')
     return { cwd: e.cwd }
   })
   on('session.end', () => {
