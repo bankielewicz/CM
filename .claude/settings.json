@@ -4,6 +4,7 @@
       "Edit(/coverage-exempt.json)",
       "Edit(/package.json)",
       "Edit(/package-lock.json)",
+      "Edit(/.npmrc)",
       "Edit(/.claude/settings.json)",
       "Edit(/.claude/settings.local.json)",
       "Edit(/scripts/**)",

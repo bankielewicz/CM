@@ -48,8 +48,10 @@ jobs:
       - name: Install Claude Code
         run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && claude --version
 
+      # The gate runs through node, not npm scripts: a .npmrc in a pull request can set
+      # script-shell so that npm reports success without running anything.
       - name: Test the coverage gate
-        run: npm test
+        run: node --test scripts/*.test.mjs
 
       - name: Validate every mod
         run: |
@@ -61,7 +63,7 @@ jobs:
           exit $status
 
       - name: Require 95% line coverage
-        run: npm run coverage
+        run: node scripts/mod-coverage.mjs
 
       # Runs even when the gate fails, so GitHub sees the real number. Upload errors
       # stay warnings: the step above is the gate, and uploads need Code Quality on.

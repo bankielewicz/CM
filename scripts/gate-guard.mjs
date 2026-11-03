@@ -16,6 +16,7 @@ export const PROTECTED = [
   'coverage-exempt.json',
   'package.json',
   'package-lock.json',
+  '.npmrc',
   '.claude/settings.json',
   '.claude/settings.local.json',
   'scripts/',

@@ -21,6 +21,7 @@ test('every file that can switch off the gate counts as protected', () => {
     'coverage-exempt.json',
     'package.json',
     'package-lock.json',
+    '.npmrc',
     '.claude/settings.json',
     '.claude/settings.local.json',
     'scripts/mod-coverage.mjs',
@@ -94,6 +95,13 @@ test('the workflow can only read, and fails when the file list could be cut shor
   assert.match(yml, /previous_filename/)
   assert.match(yml, /--paginate/)
   assert.match(yml, /-ge 3000/)
+})
+
+test('CI runs the gate through node, so npm configuration cannot skip it', () => {
+  const yml = readFileSync(join(ROOT, '.github/workflows/mod-coverage.yml'), 'utf8')
+  assert.doesNotMatch(yml, /run: npm (test|run)\b/)
+  assert.match(yml, /run: node --test scripts\/\*\.test\.mjs$/m)
+  assert.match(yml, /run: node scripts\/mod-coverage\.mjs$/m)
 })
 
 test('Claude Code denies edits to every protected path', () => {
