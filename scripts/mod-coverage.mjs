@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Line coverage for Claude Code mods, measured under the real test kit.
+// Line and function coverage for Claude Code mods, measured under the real test kit.
 //
 // `claude plugin test` has no coverage option and ignores flags it doesn't know,
 // so this instruments a temporary copy of each mod and runs the kit on the copy:
@@ -35,7 +35,7 @@ import { findMods } from './find-mods.mjs'
 
 export { findMods }
 
-/** The minimum line coverage, the same number as the GitHub ruleset's. */
+/** The minimum line and function coverage. The GitHub ruleset holds the same number, for lines. */
 export const THRESHOLD = 95
 
 const DUMP_COMMAND = '__mod_coverage__'
@@ -168,11 +168,17 @@ export function mergeDumps(seed, output) {
   return { map, dumps }
 }
 
-/** Whether a summary clears the bar. Uses the counts, so rounding can't lift 94.996 to 95. */
+// Uses the counts, so rounding can't lift 94.996 to 95.
+const underBar = ({ total, covered }) => covered * 100 < THRESHOLD * total
+
+/**
+ * Whether a summary clears the bar on both lines and functions. Lines alone aren't enough:
+ * loading a file runs every line of its one-line functions, even if nothing calls them.
+ */
 export function verdict(summary) {
-  const { total, covered } = summary.lines
-  if (total === 0) return { ok: false, reason: 'no lines to measure' }
-  if (covered * 100 < THRESHOLD * total) return { ok: false, reason: `below ${THRESHOLD}%` }
+  if (summary.lines.total === 0) return { ok: false, reason: 'no lines to measure' }
+  const missed = [underBar(summary.lines) && 'line', underBar(summary.functions) && 'function'].filter(Boolean)
+  if (missed.length > 0) return { ok: false, reason: `${missed.join(' and ')} coverage below ${THRESHOLD}%` }
   return { ok: true, reason: '' }
 }
 
@@ -275,9 +281,9 @@ function printMod(mod, result, exemptReason) {
   const ok = testsPassed && (Boolean(exemptReason) || check.ok)
   const problems = [exemptReason ? '' : check.reason, testsPassed ? '' : 'tests failed'].filter(Boolean).join('; ')
   const label = !ok ? 'FAIL' : exemptReason ? 'EXEMPT' : 'PASS'
-  const counts = `${summary.lines.covered}/${summary.lines.total} lines`
+  const measured = ({ pct, covered, total }, noun) => `${pct}% (${covered}/${total} ${noun})`
   const note = problems ? `, ${problems}` : exemptReason ? `; ${exemptReason}` : ''
-  console.log(`${label} ${mod}: ${summary.lines.pct}% (${counts})${note}`)
+  console.log(`${label} ${mod}: ${measured(summary.lines, 'lines')}, ${measured(summary.functions, 'functions')}${note}`)
   for (const failure of failures) console.log(`  ${failure}`)
   for (const file of map.files()) {
     const coverage = map.fileCoverageFor(file)
@@ -334,7 +340,7 @@ function main(argv) {
   if (summaries.length > 0) writeCobertura(combined, out, root)
   else console.log('No coverage report: every mod measured here is exempt.')
 
-  if (!allOk) console.log(`Every mod needs passing tests and, unless exempt, at least ${THRESHOLD}% line coverage.`)
+  if (!allOk) console.log(`Every mod needs passing tests and, unless exempt, at least ${THRESHOLD}% line and function coverage.`)
   return allOk ? 0 : 1
 }
 

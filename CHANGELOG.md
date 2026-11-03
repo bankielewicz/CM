@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Added a merge requirement for mods: passing tests and at least 95% line coverage, run locally with `npm run coverage` and in pull requests by the `mod-coverage` check.
+- Added a merge requirement for mods: passing tests and at least 95% line and function coverage, run locally with `npm run coverage` and in pull requests by the `mod-coverage` check.
 - Added a Claude Code Stop hook that blocks the end of a turn while changed mod code is under the bar or its tests fail.
 - Added `coverage-exempt.json` to excuse a mod from the percentage, with a reason. The Phase 0 spike is listed, at 61.58% line coverage, and its tests must still pass.
 - Added the MIT License.
