@@ -10,7 +10,7 @@ on:
   pull_request:
   push:
     # The default branch, so GitHub has a baseline to compare PRs against.
-    branches: [claude/jolly-thompson-5z0tnc]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
