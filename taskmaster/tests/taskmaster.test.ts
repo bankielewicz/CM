@@ -224,6 +224,18 @@ test('a save in flight when session.start fires again saves next under the new b
   expect(world.writes).toEqual(['self-check/unknown', SELF_CHECK_KEY])
 })
 
+test('events stored under one build are not written to another build\'s record', async ($, on) => {
+  const world = engine(on, {
+    failVersions: 1,
+    seed: { 'self-check/unknown': { schema: 1, build: 'unknown', seen: ['session.compact'], config: F12, updatedAt: 1 } },
+  })
+  await start($)
+  await untilSaved(world, record => record.seen.includes('session.start'), 'self-check/unknown')
+  await start($)
+
+  expect((await untilSeen(world, 'session.start')).seen).toEqual(['session.start'])
+})
+
 // ------------------------------------------------------- observe only
 
 test('every watched event passes through unchanged, with the engine\'s own answer', async ($, on) => {
