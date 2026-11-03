@@ -44,6 +44,10 @@ export const WATCHES_EVERY_EVENT: [Exclude<WatchedEvent, (typeof WATCHED)[number
  */
 export const UNKNOWN_BUILD = 'unknown'
 
+/** The build a version answer names. A later build may change the answer's shape, so it's checked. */
+const buildName = (version: unknown): string =>
+  typeof version === 'string' && version.trim() !== '' ? version : UNKNOWN_BUILD
+
 export const selfCheckKey = (build: string): string => `self-check/${build}`
 
 const isWatched = (name: unknown): name is WatchedEvent => (WATCHED as readonly unknown[]).includes(name)
@@ -76,7 +80,7 @@ export class SelfCheck {
   /** At session.start: from here on events are saved, starting with the ones noted before it. */
   start(io: Io, config: Config): void {
     // One lookup per session.start, so every save from it uses one key.
-    this.started = { io, build: io.version().catch(() => UNKNOWN_BUILD), config }
+    this.started = { io, build: io.version().then(buildName, () => UNKNOWN_BUILD), config }
     this.queue()
   }
 
