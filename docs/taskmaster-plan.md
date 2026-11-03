@@ -176,7 +176,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
 ```
 - `$.store` holds only a mirror and an index (it's per user and per machine).
 - Secrets are redacted before every write.
-- **`checkpointGit: commit` (default, approved).** At milestone checkpoints (step completed, PreCompact, Stop with open work, session end), the mod commits `.taskmaster/` alone with `git commit --only -m "taskmaster: checkpoint <run> <step>" -- .taskmaster/`, through `$.process.run`. `--only` keeps the user's staged work out of the commit. The fixed prefix makes these commits easy to squash or filter before a PR. Commits are throttled to at most one per milestone. Other values: `ignore` (excluded through `.git/info/exclude`) and, in Phase 2, `ref` (commit to `refs/taskmaster/<run>` with a temporary index, so the working branch history isn't touched).
+- **`checkpointGit: commit` (default, approved).** At milestone checkpoints (step completed, PreCompact, Stop with open work, session end), the mod commits `.taskmaster/` alone, through `$.process.run`: first `git add -- .taskmaster/`, then `git commit --only -m "taskmaster: checkpoint <run> <step>" -- .taskmaster/`. The `add` is required: `commit --only` refuses paths git doesn't track yet, and a new run's files are untracked. `--only` keeps the user's other staged work out of the commit and leaves it staged (verified locally; the spike re-checks on your build). The fixed prefix makes these commits easy to squash or filter before a PR. Commits are throttled to at most one per milestone. Other values: `ignore` (excluded through `.git/info/exclude`) and, in Phase 2, `ref` (commit to `refs/taskmaster/<run>` with a temporary index, so the working branch history isn't touched).
 - **`checkpointPush`:** `off` (default) or `milestone`. Commits survive a new session on the same clone. **In ephemeral containers (cloud sessions), the commits must also be pushed to survive**, so set `milestone` there, or rely on the session's own push.
 
 **F8.2 Contents**, enough to resume with no transcript:
@@ -515,16 +515,23 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 
 ## 9. Build order
 
-**Phase 0: spike (1–2 days).** Observe-only: capture skills, record the ledger, log to the journal. **Confirm on your build:**
+**Phase 0: spike (1–2 days). Built:** `spike/taskmaster-spike/`. Run it with `spike/taskmaster-spike/RUNBOOK.md`. Observe-only: capture skills, record the ledger, log to the journal, with one-shot probes for the checks that need an action. **Confirm on your build:**
 1. the order of `tool.check` and `tool.call`,
 2. that `$.tool.call(TaskCreate)` seeds tasks Claude actually sees,
 3. whether the built-in task list persists across sessions,
 4. `SessionStart.source` after `/clear` and after auto-compaction,
 5. that a `classic.Stop` block makes Claude continue,
 6. how skills preloaded into subagents are attributed,
-7. that a `git commit --only -- .taskmaster/` checkpoint commit leaves the user's staged work untouched,
+7. that `git add -- .taskmaster/` followed by `git commit --only -- .taskmaster/` leaves the user's staged work untouched,
 8. that metrics files can be written and rolled over within the hook budget,
 9. that a `skills/` folder in the plugin loads beside the hooks module (for the `taskmaster:frontmatter` skill).
+
+**Learned while building the spike** (these constrain how the real mod is written):
+- **`$` can't be passed around.** The validator refuses a module that passes, binds, or stores the engine handle; every call must be spelled `$.noun.method(...)` where it's made. The real mod therefore builds one table of engine calls (write, read, tool call, process run, state update) in `session.start`, each a closure spelled that way, and the gates, ledger, and checkpointer use that table. Hooks that fire before `session.start` buffer their data.
+- **State references need literals.** `atom({ plugin, key })` must name the plugin and key as string literals, not constants.
+- **Relative `$.fs` paths resolve against the session's working directory** (the plugin folder under `claude plugin test`), so `.taskmaster/` lands in the project as intended.
+- **`git commit --only` needs a prior `git add`** for new files (see F8.1).
+- **The validator lists every "gating hook without .catch"** (tool.call, Stop, compaction, ...). An observer that throws is skipped, which fails open. That suits the spike and the real mod's Stop gate; only the `TaskUpdate` gate gets a `.catch`.
 
 → **Gate A (technical go/no-go, §10.1).**
 
