@@ -1,0 +1,1 @@
+Control for a test on a pull request that is never merged. This file is not a coverage gate file.
