@@ -39,8 +39,17 @@ type ProbeName =
   | 'deny-write-subagent'
   | 'deny-complete'
   | 'taskcompleted-block'
+  | 'deny-handback'
 
-type Probe = { firedAt?: number; agentId?: string; taskId?: string; tool?: string; stopActive?: boolean }
+type Probe = {
+  firedAt?: number
+  agentId?: string
+  taskId?: string
+  tool?: string
+  stopActive?: boolean
+  /** deny-handback: the held subagent called SubagentHandback again. */
+  retried?: boolean
+}
 
 type TaskMark = { id: string; subject: string }
 
@@ -88,6 +97,8 @@ const PROBE_HELP: Record<ProbeName, string> = {
     'Armed. Ask Claude: "Create a task called spike test, mark it in progress, then mark it completed." The mod denies the completion once.',
   'taskcompleted-block':
     'Armed. Ask Claude: "Create a task called spike backstop, mark it in progress, then mark it completed." The mod blocks the TaskCompleted event once.',
+  'deny-handback':
+    'Armed. Ask Claude: "Use a subagent to read docs/taskmaster-plan.md and summarise it in one line." The mod refuses that subagent\'s first SubagentHandback once.',
 }
 
 const IMMEDIATE_PROBES = ['seed-task', 'readonly-query', 'git-commit-only', 'journal-stress'] as const
@@ -125,6 +136,8 @@ export const register: Register = on => {
   // engine's own helper agents (compaction summarizer, prompt-side helpers)
   // also raise SubagentStop, with an empty agent_type, but are never spawned.
   const spawnedAgents = new Set<string>()
+  // The last tool each subagent called (for the subagent probes' evidence).
+  const lastToolOf = new Map<string, string>()
   // Main-loop model calls whose tool.check has run, until their tool.call ends.
   const checkedCalls = new Set<string>()
   // The permission mode the classic hooks last reported (permission_mode).
@@ -500,6 +513,7 @@ export const register: Register = on => {
       case 'deny-write-subagent':
       case 'deny-complete':
       case 'taskcompleted-block':
+      case 'deny-handback':
         probes.set(name, {})
         await setCheck(name, 'pending', `Probe armed. ${PROBE_HELP[name]}`)
         return `${name}: ${PROBE_HELP[name]}`
@@ -712,10 +726,26 @@ export const register: Register = on => {
     if (e.agentId && subProbe?.firedAt !== undefined && subProbe.agentId === e.agentId) {
       const isPass = answer.includes(MARK.subContinued)
       probes.delete('subagent-stop-block')
+      const after =
+        subProbe.stopActive === undefined
+          ? `it did not continue: no second SubagentStop before its turn ended (last tool call: ${lastToolOf.get(e.agentId) ?? 'none'})`
+          : `stop_hook_active on its next stop: ${String(subProbe.stopActive)}`
       await setCheck(
         'subagent-stop-block',
         isPass ? 'pass' : 'fail',
-        `After the block subagent ${e.agentId.slice(0, 8)} (${subProbe.tool ?? '?'}) ${isPass ? 'continued and ended with' : 'ended without'} ${MARK.subContinued}; stop_hook_active on its next stop: ${String(subProbe.stopActive ?? 'not seen')}; turn ended: ${e.reason}.`,
+        `After the block subagent ${e.agentId.slice(0, 8)} (${subProbe.tool ?? '?'}) ${isPass ? 'continued and ended with' : 'ended without'} ${MARK.subContinued}; ${after}; mode: ${mode}; turn ended: ${e.reason}.`,
+      )
+    }
+    // deny-handback passes when the held subagent kept working: the marker
+    // exists only in the deny, so an answer carrying it read the deny and went on.
+    const handProbe = probes.get('deny-handback')
+    if (e.agentId && handProbe?.firedAt !== undefined && handProbe.agentId === e.agentId) {
+      const isPass = answer.includes(MARK.handbackContinued)
+      probes.delete('deny-handback')
+      await setCheck(
+        'deny-handback',
+        isPass ? 'pass' : 'fail',
+        `After the refused hand-back, subagent ${e.agentId.slice(0, 8)} ${handProbe.retried ? 'handed back again' : 'did not hand back again'} and ${isPass ? 'ended with' : 'ended without'} ${MARK.handbackContinued}; mode: ${mode}; turn ended: ${e.reason}.`,
       )
     }
     await pushCounters()
@@ -848,6 +878,31 @@ export const register: Register = on => {
 
     // ---- probes that deny: the model's calls only, never the mod's own
     if (!isOwn) {
+      if (e.agentId) {
+        lastToolOf.set(e.agentId, tool)
+      }
+
+      // deny-handback: a spawned subagent reports through SubagentHandback,
+      // which ends it before SubagentStop can hold it. Refuse the first one.
+      if (tool === 'SubagentHandback' && e.agentId && spawnedAgents.has(e.agentId)) {
+        const handback = probes.get('deny-handback')
+        if (handback && handback.firedAt === undefined) {
+          probes.set('deny-handback', { firedAt: started, agentId: e.agentId })
+          await setCheck(
+            'deny-handback',
+            'pending',
+            `Refused subagent ${e.agentId.slice(0, 8)}'s first SubagentHandback (mode: ${mode}); waiting for its answer.`,
+          )
+          await log({ kind: 'probe.fired', probe: 'deny-handback', id, agentId: e.agentId })
+          return {
+            deny: `TASKMASTER-SPIKE PROBE: the taskmaster-spike mod refused this hand-back on purpose, to test holding a subagent. Keep working: add the word ${MARK.handbackContinued} at the end of your report, then hand it back again.`,
+          }
+        }
+        if (handback?.firedAt !== undefined && handback.agentId === e.agentId) {
+          probes.set('deny-handback', { ...handback, retried: true })
+        }
+      }
+
       const name: ProbeName = e.agentId ? 'deny-write-subagent' : 'deny-write'
       const writeProbe = probes.get(name)
       if (WRITE_TOOLS.has(tool) && writeProbe && writeProbe.firedAt === undefined) {

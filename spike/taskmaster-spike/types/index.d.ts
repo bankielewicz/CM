@@ -3,6 +3,7 @@ export type CheckStatus = 'pending' | 'pass' | 'fail' | 'info'
 export type CheckId =
   | 'stop-block'
   | 'subagent-stop-block'
+  | 'deny-handback'
   | 'deny-write'
   | 'deny-write-subagent'
   | 'deny-complete'

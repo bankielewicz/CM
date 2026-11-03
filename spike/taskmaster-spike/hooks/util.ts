@@ -37,6 +37,7 @@ export async function shortHash(text: string): Promise<string> {
 export const MARK = {
   continued: 'SPIKE-CONTINUED',
   subContinued: 'SPIKE-SUB-CONTINUED',
+  handbackContinued: 'SPIKE-HANDBACK-CONTINUED',
   denied: 'SPIKE-DENIED-SEEN',
   preload: 'SPIKE-PRELOAD-OK',
   skill: 'SPIKE-SKILL-OK',

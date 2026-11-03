@@ -301,3 +301,80 @@ test("check-every-mode counts each main-loop call under its turn's permission mo
   expect(status.text).toContain('✓ check-every-mode')
   expect(status.text).toContain('bypassPermissions 5/5')
 })
+
+// -------------------------------------------------------- deny-handback
+
+// A subagent reporting back to its spawner, as 2.1.317 subagents do.
+function handback($: Engine, report: string, agentId?: string) {
+  // SubagentHandback is the engine's own tool, outside the typed tool list.
+  const input = { tool: 'SubagentHandback', report, ...(agentId ? { agentId } : {}) }
+  return $.tool.call(input as unknown as Parameters<Engine['tool']['call']>[0])
+}
+
+test("deny-handback refuses a spawned subagent's first hand-back, then lets the next one through", async ($, on) => {
+  engine(on)
+  spawner(on)
+  await start($)
+  await spike($, 'probe deny-handback')
+  await spawn($)
+
+  const first = await handback($, 'One-line summary.', SPAWNED)
+  expect(first.deny).toContain('SPIKE-HANDBACK-CONTINUED')
+
+  const second = await handback($, 'One-line summary. SPIKE-HANDBACK-CONTINUED', SPAWNED)
+  expect(second.deny).toBeUndefined()
+
+  await subagentAnswer($, 'One-line summary. SPIKE-HANDBACK-CONTINUED')
+  const status = await spike($, 'status')
+  expect(status.text).toContain('✓ deny-handback')
+  expect(status.text).toContain('handed back again')
+})
+
+test('deny-handback fails when the held subagent ends without the marker', async ($, on) => {
+  engine(on)
+  spawner(on)
+  await start($)
+  await spike($, 'probe deny-handback')
+  await spawn($)
+
+  await handback($, 'One-line summary.', SPAWNED)
+  await subagentAnswer($, 'One-line summary.')
+
+  const status = await spike($, 'status')
+  expect(status.text).toContain('✗ deny-handback')
+  expect(status.text).toContain('did not hand back again')
+})
+
+test('deny-handback never refuses a hand-back from the main loop or a helper agent', async ($, on) => {
+  engine(on)
+  spawner(on)
+  await start($)
+  await spike($, 'probe deny-handback')
+
+  const main = await handback($, 'report')
+  expect(main.deny).toBeUndefined()
+  const helper = await handback($, 'report', 'helper-1')
+  expect(helper.deny).toBeUndefined()
+
+  const status = await spike($, 'status')
+  expect(status.text).toContain('… deny-handback')
+})
+
+test('subagent-stop-block says so when the subagent did not continue after the block', async ($, on) => {
+  engine(on)
+  spawner(on)
+  await start($)
+  await spike($, 'probe subagent-stop-block')
+  await spawn($)
+
+  // As seen in auto mode: the report went back first, then the stop, then the end.
+  await handback($, 'One-line summary.', SPAWNED)
+  const blocked = await subagentStop($, SPAWNED, 'general-purpose')
+  expect(blocked.block).toContain('SPIKE-SUB-CONTINUED')
+  await subagentAnswer($, 'One-line summary.')
+
+  const status = await spike($, 'status')
+  expect(status.text).toContain('✗ subagent-stop-block')
+  expect(status.text).toContain('did not continue: no second SubagentStop')
+  expect(status.text).toContain('last tool call: SubagentHandback')
+})

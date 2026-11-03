@@ -30,6 +30,14 @@ export const CHECKS: readonly CheckInfo[] = [
     title: 'SubagentStop block makes a subagent continue',
     answers: 'G4 feasibility',
     how: '/tm-spike probe subagent-stop-block, then ask Claude to run a subagent',
+    ifFails: 'G4 moves to the SubagentHandback deny if deny-handback passes; otherwise drop G4',
+    isBlocking: false,
+  },
+  {
+    id: 'deny-handback',
+    title: 'tool.call deny on SubagentHandback holds a subagent',
+    answers: 'G4 alternative (a SubagentStop block did not hold one)',
+    how: '/tm-spike probe deny-handback, then ask Claude to run a subagent',
     ifFails: 'Drop G4; hold subagents only through the main Stop gate',
     isBlocking: false,
   },
@@ -182,7 +190,7 @@ export function formatStatus(checks: Checks): string {
     '',
     ...rows,
     '',
-    'Probes: /tm-spike probe <stop-block|subagent-stop-block|deny-write|deny-write-subagent|deny-complete|taskcompleted-block|seed-task|readonly-query|git-commit-only|journal-stress>',
+    'Probes: /tm-spike probe <stop-block|subagent-stop-block|deny-handback|deny-write|deny-write-subagent|deny-complete|taskcompleted-block|seed-task|readonly-query|git-commit-only|journal-stress>',
     'Report: /tm-spike report  ·  Pane: /tm-spike pane',
   ].join('\n')
 }

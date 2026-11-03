@@ -1,6 +1,6 @@
 # Gate A close-out: tasks
 
-This is the durable copy of the Gate A close-out task list. Claude's built-in task list probably won't survive step 2.6 (`/clear`), which is exactly what `tasklist-persist` tests, or the new session in 3.1. After either one, point Claude at this file to re-create the open tasks. The numbers in brackets are the built-in task ids in the session that made this list.
+This is the durable copy of the Gate A close-out task list. Claude's built-in task list probably won't survive step 2.6 (`/clear`), which is exactly what `tasklist-persist` tests, or the new session in 3.1. After either one, point Claude at this file to re-create the open tasks. The numbers in brackets are built-in task ids: item 1's are from session `119c2caf`, and items 2.3a onward are from the resumed session `9ea42fa8`.
 
 **Decisions taken**
 - The list is kept in two places: built-in tasks and this file.
@@ -20,15 +20,22 @@ This is the durable copy of the Gate A close-out task list. Claude's built-in ta
 - [x] 1.10 Commit and push to `claude/jolly-thompson-5z0tnc`. The mod hot-reloads, which forgets armed probes and keeps results. [#11]
 
 ## 2. Remaining probes, one at a time (you arm, Claude answers)
-- [ ] 2.1 `/tm-spike status`: the mod reloaded and nothing is armed [#12]
-- [ ] 2.2 `/tm-spike probe deny-write-subagent`, then "Use a subagent to create a file named spike-deny-sub.txt containing hello." Expect pass, and the file shouldn't exist. [#13]
-- [ ] 2.3 `/tm-spike probe subagent-stop-block`, then "Use a subagent to read docs/taskmaster-plan.md and summarise it in one line." Expect pass with `SPIKE-SUB-CONTINUED`. [#14]
-- [ ] 2.4 `/tm-spike probe readonly-query`: the evidence lists Bash [#15]
-- [ ] 2.5 `/compact`: `compaction-events` turns to pass. It runs before `/clear` on purpose. [#16]
-- [ ] 2.6 "Create a task called persistence check.", then `/clear`. About 3 s later `tasklist-persist` reads PERSISTS or DOES NOT PERSIST. Don't edit the mod between these two steps. [#17]
+- [x] 2.1 `/tm-spike status`: the mod reloaded (`/17 checks`) and nothing is armed
+- [x] 2.2 `deny-write-subagent`: **pass**. Subagent `a6549880`'s Write was denied, it replied `SPIKE-DENIED-SEEN`, and `spike-deny-sub.txt` doesn't exist. Deny works in subagents, so the softer §10.1 rule wasn't needed.
+- [x] 2.3 `subagent-stop-block`: **fail, a real finding (auto mode)**. The probe blocked the right agent (`aaea4a5c`, general-purpose), but that agent had already reported through `SubagentHandback`. There was no second SubagentStop, and `turn.complete` came straight after: a SubagentStop block doesn't hold a subagent.
+- [ ] 2.3a Add the `deny-handback` probe (refuse a spawned subagent's first `SubagentHandback`), plus clearer `subagent-stop-block` evidence and the mode in both. Tests, docs, push, sync. (Claude) [#7]
+- [ ] 2.3b `/reload-plugins` (hot reload was declined in this run), then `/tm-spike status`: the header reads `/18 checks` [#8]
+- [ ] 2.3c `/tm-spike probe deny-handback`, then "Use a subagent to read docs/taskmaster-plan.md and summarise it in one line." A pass means the subagent was held, kept working, and its report ends with `SPIKE-HANDBACK-CONTINUED`. [#9]
+- [ ] 2.4 `/tm-spike probe readonly-query`: the evidence lists real calls carrying `isReadOnly` [#10]
+- [ ] 2.5 `/compact`: `compaction-events` turns to pass. It runs before `/clear` on purpose. [#11]
+- [ ] 2.6 Claude first ticks this file and pushes. Then "Create a task called persistence check.", then `/clear`. About 3 s later `tasklist-persist` reads PERSISTS or DOES NOT PERSIST. Don't edit the mod between these two steps. [#12]
 
 ## 3. Bypass session, report, Gate A, Phase 1
-- [ ] 3.1 A new session in bypass permissions mode with the spike loaded: make at least 5 tool calls, and `check-every-mode` should show checks equal to calls [#18]
-- [ ] 3.2 `/tm-spike report`: every row is answered, and the verdict is read against §10.1 [#19]
-- [ ] 3.3 Record Gate A in `docs/taskmaster-plan.md` §10.1: the verdict, the date, the build, the fallbacks switched on, and the findings table. `.taskmaster/spike/` is gitignored. Tick this file, then commit and push. [#20]
-- [ ] 3.4 Split the Phase 1 MVP (plan §9) into tasks [#21]
+- [ ] 3.1 In bypass permissions mode with the spike loaded: make at least 5 tool calls (`check-every-mode` should pass). Re-run `subagent-stop-block` (and `deny-handback`, if it failed) to see whether the subagent results depend on the mode. [#13]
+- [ ] 3.2 `/tm-spike report`: every row is answered, and the verdict is read against §10.1 [#14]
+- [ ] 3.3 Record Gate A in `docs/taskmaster-plan.md` §10.1: the verdict, the date, the build, the fallbacks switched on, and the findings table (`.taskmaster/spike/` is gitignored). Settle G4's mechanism from `subagent-stop-block` (auto and bypass) and `deny-handback`. Tick this file, then commit and push. [#15]
+- [ ] 3.4 Split the Phase 1 MVP (plan §9) into tasks [#16]
+
+## Observed along the way
+- **The task list is kept per session id.** The container restarted and resumed the first session (`9ea42fa8`). Its built-in list came back (the old probe tasks #4–#6), while the list made in `119c2caf` (the session after `/clear`) wasn't visible. Step 2.6 records what `/clear` does in the spike's own evidence.
+- **This run declined hot reload.** Mod edits load on `/reload-plugins` or at the next session start, not at the end of a turn.

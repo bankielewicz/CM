@@ -32,8 +32,11 @@ Arm a probe, then send the prompt shown. Run one probe at a time.
 | `/tm-spike probe seed-task` | `List your tasks.` | `seed-task` | Claude's own `TaskList` shows the task the mod created |
 | `/tm-spike probe deny-write-subagent` | `Use a subagent to create a file named spike-deny-sub.txt containing hello.` | `deny-write-subagent` | The subagent's write is denied |
 | `/tm-spike probe subagent-stop-block` | `Use a subagent to read docs/taskmaster-plan.md and summarise it in one line.` | `subagent-stop-block` | The subagent Claude spawns is blocked once, continues, and its final answer (read from its `turn.complete`) ends with `SPIKE-SUB-CONTINUED` |
+| `/tm-spike probe deny-handback` | `Use a subagent to read docs/taskmaster-plan.md and summarise it in one line.` | `deny-handback` | The spawned subagent's first `SubagentHandback` is refused, it keeps working, and its final report ends with `SPIKE-HANDBACK-CONTINUED` |
 
 **About the subagent probes.** Claude Code's own helper agents (the compaction summarizer, and small helpers that run around each prompt) raise SubagentStop too, with an empty agent type. `subagent-stop-block` ignores them and fires only for an agent started through the Agent tool. On 2.1.317, a spawned agent's SubagentStop has an empty `last_assistant_message`, and its second stop comes *before* its `turn.complete`. So the probe judges the marker from `turn.complete`'s answer, and reports `stop_hook_active` from the second stop.
+
+**Why `deny-handback` exists.** On 2.1.317 in auto mode, `subagent-stop-block` failed. The subagent had already delivered its report through the `SubagentHandback` tool, the engine ended it whatever SubagentStop answered, and there was no second stop. `deny-handback` tests the alternative for G4: refuse that tool call while the subagent is still running. The hand-back report carries auto mode's review, so the path may differ by mode. Run both subagent probes once more in the bypass session (§5); their evidence records the mode.
 
 ## 3. Skills: does a plugin's `skills/` folder load, and which loop is a skill attributed to?
 
@@ -61,6 +64,7 @@ The Plan Gate decides in the real call's `tool.check`, so `tool.check` has to fi
 1. Start a session in bypass permissions mode with the spike loaded, for example `claude --permission-mode bypassPermissions --plugin-dir ./spike/taskmaster-spike`, or switch the session's mode to bypass.
 2. Ask for anything that makes at least 5 tool calls (for example `List the files in spike/taskmaster-spike and read its README.`).
 3. Run `/tm-spike status`. `check-every-mode` passes when bypassPermissions shows `N/N` with N ≥ 5, and fails if bypass skipped a `tool.check`. A miss in another mode is listed but doesn't decide the check.
+4. While in bypass, re-run `subagent-stop-block` (and `deny-handback`, if it failed in auto mode), to see whether the subagent results depend on the mode. Write down the auto-mode results first: a re-run replaces a check's row.
 
 ## 6. Report
 
