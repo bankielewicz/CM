@@ -1,0 +1,19 @@
+{
+  "name": "cm-tooling",
+  "private": true,
+  "type": "module",
+  "description": "Test and coverage tooling for the Claude Code mods in this repository",
+  "scripts": {
+    "coverage": "node scripts/mod-coverage.mjs",
+    "test": "node --test scripts/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "istanbul-lib-coverage": "3.2.2",
+    "istanbul-lib-instrument": "6.0.3",
+    "istanbul-lib-report": "3.0.1",
+    "istanbul-reports": "3.2.0"
+  }
+}
