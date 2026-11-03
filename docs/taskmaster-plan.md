@@ -258,7 +258,7 @@ A third-party mod can't send events to Anthropic's telemetry or to the user's Op
   - audit call (tokens, latency, findings),
   - turn summary (duration, `usage`),
   - rating, incident (F15).
-- *Privacy:* no raw prompt, code, or file contents. Commands are stored as the normalized program plus a hash of the arguments, and paths are hashed relative to the repository root. Redaction runs before every write. Nothing leaves the machine unless `metricsWebhook` is set.
+- *Privacy:* no raw prompt, code, or file contents. Commands are stored as the normalized program plus a hash of the arguments, and paths are hashed relative to the repository root. Redaction runs before every write. The mod sends nothing off the machine unless `metricsWebhook` is set, but by default the files are committed with the checkpoints, so a push publishes them.
 
 **F13.2 Run summary:** one row per run in `runs.jsonl`.
 - **Steps:** declared, satisfied, waived (by Claude or the user), released, abandoned.
@@ -507,7 +507,7 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 | API drift between builds | Pin the build; startup self-check; validate in CI |
 | Self-improvement loop drifts toward "enforce nothing" | Proposals are never applied automatically; replay must show saves weren't lost; only user signals trip the circuit breaker; RCA may return `true_positive` |
 | RCA invents plausible stories | Every "why" must cite journal events; fixed taxonomy; dedupe by signature; track the accept and reject rate and scale back if it's poor |
-| Metrics leak code or prompts | No raw text stored; hashed paths and arguments; redaction; local unless `metricsWebhook` is set |
+| Metrics leak code or prompts | No raw text stored; hashed paths and arguments; redaction. The mod sends them nowhere unless `metricsWebhook` is set, but by default they're committed with the checkpoints, so a push publishes them |
 | Rating fatigue skews UX data | Sampled 1 in 3, at most once an hour, one click; weighted against implicit signals |
 | Checkpoint commits clutter history | `--only` pathspec commits with a fixed prefix (easy to squash or filter); `ref` mode in Phase 2 |
 | Comparing frontmatter vs none is confounded | Paired design: the same skills with and without frontmatter; arms assigned per run by hash |

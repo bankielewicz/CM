@@ -85,7 +85,7 @@
     "metrics": {
       "type": "boolean",
       "title": "Metrics",
-      "description": "Log gate decisions and run summaries to the metrics folder. Nothing leaves the machine.",
+      "description": "Log gate decisions and run summaries to the metrics folder. The mod sends them nowhere itself, but by default they're committed with the checkpoints, so a push publishes them.",
       "default": true
     },
     "metricsDir": {
