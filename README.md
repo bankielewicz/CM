@@ -140,9 +140,11 @@ It prints `PASS`, `FAIL` or `EXEMPT` for each mod with its line coverage, and ex
 
 A mod listed in [`coverage-exempt.json`](coverage-exempt.json) is excused from the percentage, but its tests must still pass. The spike is listed there because it predates the bar.
 
-The `mod-coverage` check runs from the pull request's own files, so a separate `gate-guard` check fails any pull request that changes the gate's own files: `coverage-exempt.json`, `package.json`, `package-lock.json`, `scripts/`, `.github/workflows/` and Claude Code's project settings. It runs from the base branch, so a pull request can't change it for itself. To change the gate on purpose, the repository owner lifts that check in the ruleset for the merge.
+The `mod-coverage` check runs from the pull request's own files, so a separate `gate-guard` check fails any pull request that changes the gate's own files: `coverage-exempt.json`, `package.json`, `package-lock.json`, `.npmrc`, `scripts/`, `.github/workflows/` and Claude Code's project settings. It runs from the base branch, so a pull request can't change it for itself. To change the gate on purpose, the repository owner lifts that check in the ruleset for the merge.
 
 Claude Code's project settings also deny Claude edits to those files and `gh pr merge`. Those rules cover the commands Claude normally writes, so treat them as a guard rail, not a security boundary.
+
+The gate reads its numbers from what tests print, so a test written to print fake counters would pass. Review changes to tests with that in mind.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/spike-coverage-dark.svg">

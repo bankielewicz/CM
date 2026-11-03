@@ -231,6 +231,52 @@ test('a hook file no test imports pulls the mod below the bar', () => {
   assert.match(out, /unused\.ts/)
 })
 
+// Each body is on its own line, so importing a file doesn't count as covering it.
+const PADDING = Array.from({ length: 40 }, (_, i) => `export const v${i} = (x: number) => {\n  return x + ${i}\n}\n`).join('')
+
+test('code outside hooks/ counts when a hook imports it', () => {
+  const root = scratch()
+  const dir = mod(root, 'm', KIT + CALL_WRITE + CALL_READ, {
+    'lib/logic.ts': PADDING,
+    'hooks/register.ts': `import { v0 } from '../lib/logic'
+export const first = v0(1)
+export const register = (on: any) => {
+  on('tool.call', (_: any, e: any, next: any) => {
+    if (e.tool === 'Write') {
+      return { deny: 'no writes' }
+    }
+    return next(e)
+  })
+}
+`,
+  })
+  const { status, out } = runCli(root, '--out', join(root, 'cov'), dir)
+  assert.equal(status, 1, out)
+  assert.match(out, /lib\/logic\.ts/)
+})
+
+test('every JavaScript and TypeScript file in a mod counts, whatever its extension or folder', () => {
+  const root = scratch()
+  const files = ['hooks/helper.mjs', 'lib/other.cjs', 'lib/typed.mts', 'lib/typed.cts', 'types/logic.ts']
+  const dir = mod(root, 'm', KIT + CALL_WRITE + CALL_READ, Object.fromEntries(files.map(file => [file, PADDING])))
+  const { status, out } = runCli(root, '--out', join(root, 'cov'), dir)
+  assert.equal(status, 1, out)
+  for (const file of files) assert.match(out, new RegExp(file.replace('.', '\\.')))
+})
+
+test('tests and their helpers, type declarations and the manifest folder do not count', () => {
+  const root = scratch()
+  const dir = mod(root, 'm', KIT + CALL_WRITE + CALL_READ, {
+    'tests/helper.ts': PADDING,
+    'types/index.d.ts': 'export type T = string\n',
+    '.claude-plugin/extra.ts': PADDING,
+    'skills/s/SKILL.md': '# A skill\n',
+  })
+  const { status, out } = runCli(root, '--out', join(root, 'cov'), dir)
+  assert.equal(status, 0, out)
+  assert.doesNotMatch(out, /helper\.ts|index\.d\.ts|extra\.ts|SKILL\.md/)
+})
+
 test('a failing test fails the gate even with full coverage', () => {
   const root = scratch()
   const failing = `test('wrong', async ($: any, on: any) => {

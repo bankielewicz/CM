@@ -10,6 +10,9 @@
 // - The engine's scan has to read `atom(...)` declarations, so they stay
 //   uninstrumented and out of the count.
 //
+// Known limit: the counters come from what tests print, so a test written to print
+// fake ones would pass. That takes deliberate cheating, and it shows in review.
+//
 // Exits 1 if any mod is under THRESHOLD, if its tests fail, or if there is
 // nothing to measure. A mod listed in coverage-exempt.json, with a reason, is
 // excused from the percentage only: it's still measured and printed, its tests
@@ -41,10 +44,12 @@ const CLOSE = '__MOD_COV_END__'
 const ENTRY = '__mod_coverage_entry.ts'
 const EXEMPT_FILE = 'coverage-exempt.json'
 const REPORT = 'cobertura-coverage.xml'
-const SOURCE = /\.(ts|tsx|js|jsx)$/
-const NOT_CODE = /(\.d\.ts|\.test\.tsx?)$/
+const SOURCE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/
+const NOT_CODE = /(\.d\.[cm]?ts|\.test\.[cm]?[jt]sx?)$/
 const TEST = /\.test\.tsx?$/
 const SKIPPED_DIRS = new Set(['.claude', '.git', 'node_modules'])
+// Top-level folders of a mod that hold no mod code. Everything else is measured.
+const UNMEASURED_DIRS = new Set(['tests', '.claude-plugin'])
 
 // Takes only the counters: the maps are known from instrumenting.
 const COUNTERS = `(cov: any) => Object.fromEntries(Object.entries(cov ?? {}).map(([path, c]: any) => [path, { s: c.s, f: c.f, b: c.b }]))`
@@ -122,7 +127,7 @@ const test: any = (name: string, ...rest: any[]) => {
 }
 
 function entryModule(moduleFile) {
-  const inner = moduleFile.replace(SOURCE, '')
+  const inner = moduleFile.replace(/\.(ts|tsx|js|jsx)$/, '')
   return `import { register as inner } from '${inner}'
 
 export const register = (on: any, options: any) => {
@@ -198,6 +203,14 @@ function walk(dir) {
   })
 }
 
+/** A mod's source files, whether or not anything loads them. */
+function modSource(copy) {
+  return walk(copy).filter(file => {
+    const [top] = relative(copy, file).split(sep)
+    return SOURCE.test(file) && !NOT_CODE.test(file) && !UNMEASURED_DIRS.has(top)
+  })
+}
+
 function measureMod(mod, root) {
   const absolute = resolve(root, mod)
   const work = mkdtempSync(join(tmpdir(), 'mod-coverage-'))
@@ -213,8 +226,7 @@ function measureMod(mod, root) {
     if (modules?.length !== 1) throw new Error(`hooks.json must name one module, found ${modules?.length ?? 0}`)
 
     const seed = {}
-    for (const file of walk(hooksDir)) {
-      if (!SOURCE.test(file) || NOT_CODE.test(file)) continue
+    for (const file of modSource(copy)) {
       const key = relative(root, join(absolute, relative(copy, file)))
       const { code, coverage } = instrumentSource(readFileSync(file, 'utf8'), key)
       writeFileSync(file, code)
