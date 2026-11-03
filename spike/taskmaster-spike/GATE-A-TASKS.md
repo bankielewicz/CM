@@ -23,10 +23,10 @@ This is the durable copy of the Gate A close-out task list. Claude's built-in ta
 - [x] 2.1 `/tm-spike status`: the mod reloaded (`/17 checks`) and nothing is armed
 - [x] 2.2 `deny-write-subagent`: **pass**. Subagent `a6549880`'s Write was denied, it replied `SPIKE-DENIED-SEEN`, and `spike-deny-sub.txt` doesn't exist. Deny works in subagents, so the softer §10.1 rule wasn't needed.
 - [x] 2.3 `subagent-stop-block`: **fail, a real finding (auto mode)**. The probe blocked the right agent (`aaea4a5c`, general-purpose), but that agent had already reported through `SubagentHandback`. There was no second SubagentStop, and `turn.complete` came straight after: a SubagentStop block doesn't hold a subagent.
-- [ ] 2.3a Add the `deny-handback` probe (refuse a spawned subagent's first `SubagentHandback`), plus clearer `subagent-stop-block` evidence and the mode in both. Tests, docs, push, sync. (Claude) [#7]
-- [ ] 2.3b `/reload-plugins` (hot reload was declined in this run), then `/tm-spike status`: the header reads `/18 checks` [#8]
-- [ ] 2.3c `/tm-spike probe deny-handback`, then "Use a subagent to read docs/taskmaster-plan.md and summarise it in one line." A pass means the subagent was held, kept working, and its report ends with `SPIKE-HANDBACK-CONTINUED`. [#9]
-- [ ] 2.4 `/tm-spike probe readonly-query`: the evidence lists real calls carrying `isReadOnly` [#10]
+- [x] 2.3a Add the `deny-handback` probe (refuse a spawned subagent's first `SubagentHandback`), plus clearer `subagent-stop-block` evidence and the mode in both. Tests, docs, push, sync. (Claude) [#7]
+- [ ] 2.3b **Deferred to the next session start.** `/reload-plugins` isn't available over a remote connection, and the mods question didn't come up again. The synced dev-mods copy loads by itself when the session next starts or resumes (as it did after the earlier container restart). Then `/tm-spike status` reads `/18 checks`. [#8]
+- [ ] 2.3c `/tm-spike probe deny-handback`, then "Use a subagent to read docs/taskmaster-plan.md and summarise it in one line." A pass means the subagent was held, kept working, and its report ends with `SPIKE-HANDBACK-CONTINUED`. Run it right after 2.3b, together with 3.1. [#9]
+- [x] 2.4 `readonly-query`: done without re-running the probe. The row now refreshes itself from real calls (`isReadOnly` on TaskList ×1, Bash ×1). A `$.tool.check` query still can't read it, so the Plan Gate decides in the real call's `tool.check`. [#10]
 - [ ] 2.5 `/compact`: `compaction-events` turns to pass. It runs before `/clear` on purpose. [#11]
 - [ ] 2.6 Claude first ticks this file and pushes. Then "Create a task called persistence check.", then `/clear`. About 3 s later `tasklist-persist` reads PERSISTS or DOES NOT PERSIST. Don't edit the mod between these two steps. [#12]
 
@@ -38,4 +38,5 @@ This is the durable copy of the Gate A close-out task list. Claude's built-in ta
 
 ## Observed along the way
 - **The task list is kept per session id.** The container restarted and resumed the first session (`9ea42fa8`). Its built-in list came back (the old probe tasks #4–#6), while the list made in `119c2caf` (the session after `/clear`) wasn't visible. Step 2.6 records what `/clear` does in the spike's own evidence.
-- **This run declined hot reload.** Mod edits load on `/reload-plugins` or at the next session start, not at the end of a turn.
+- **No hot reload in this run.** Mod edits load only at the next session start: `/reload-plugins` isn't available remotely, and the mods question didn't come up again.
+- **`check-every-mode` so far:** `tool.check` ran for every main-loop call in auto (11/11) and plan (37/37) modes. Only bypass is left (3.1).
