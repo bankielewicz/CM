@@ -75,4 +75,9 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 
 - `.taskmaster/spike/` isn't committed, so anything Gate A needs goes into plan §10.1. New spike learnings go into plan §9, and behaviour changes into `RUNBOOK.md`.
 - The default branch is protected and nobody can bypass the ruleset, so every change lands through a PR, including where `GATE-A-TASKS.md` says to push.
-- The spike predates the coverage bar and is exempt in `coverage-exempt.json`, at 61.58% (`hooks/register.tsx` 57.14%). Its tests must still pass. Delete the entry with the spike once Gate A closes, but land the first real mod before deleting the spike: with no mods at all the gate fails, which blocks every merge.
+- The spike predates the coverage bar and is exempt in `coverage-exempt.json`, at 61.58% (`hooks/register.tsx` 57.14%). Its tests must still pass. Gate A has closed, so retire the spike as `docs/phase-1-tasks.md` P1.0b says, in this order:
+  1. Land the first real mod. With no mods at all the gate fails, which blocks every merge.
+  2. A PR deletes `spike/`. The gate ignores the leftover entry.
+  3. A second PR removes the entry, with the owner lifting `gate-guard` for it.
+
+  Removing the entry while `spike/` exists fails the gate at 61.58%.

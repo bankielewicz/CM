@@ -8,7 +8,7 @@ This is the durable task list for the Phase 1 MVP prototype (`docs/taskmaster-pl
 3. **Coverage:** `npm run coverage` passes, with at least 95% line and function coverage.
 4. **Verify:** `claude plugin validate`, then the typecheck. Then load the mod with `claude --plugin-dir ./taskmaster` and check it in a real terminal.
 
-Report the commands with their output. `main` is protected, so each task (or a small group of tasks) lands as its own PR, and the `mod-coverage` check must pass on each one.
+Report the commands with their output. `main` is protected, so each task (or a small group of tasks) lands as its own PR, and both required checks, `mod-coverage` and `gate-guard`, must pass on each one.
 
 **Decisions taken** (defaults; change them here if the owner decides otherwise)
 - **Location:** the mod lives at `taskmaster/` in the repo root. The coverage gate treats any folder with `.claude-plugin/plugin.json` and `hooks/hooks.json` as a mod. It isn't exempt: it meets the 95% bar from its first PR.
@@ -23,11 +23,22 @@ Report the commands with their output. `main` is protected, so each task (or a s
 **Open questions for the owner** (neither blocks M0–M3)
 1. **Resume without the Plan Gate (P1.15).** F8.6 has the Plan Gate make a resumed run reload the skill, rebuild its tasks and read `HANDOFF.md` before any write. Phase 1 has no Plan Gate. Proposal: `/taskmaster resume` does the first two itself, and G3 blocks the stop until `HANDOFF.md` has been read.
 2. **Legitimate waits (P1.10).** Proposal: Phase 1 recognises a wait from `taskmaster_await_user`, or from a trailing "?" on the last message (F5's fast pre-check). The `$.model.classify` fallback arrives with Phase 2's question detection.
-3. **The spike after Gate A (P1.0b).** `CLAUDE.md` says to delete the spike and its coverage exemption once Gate A closes, but only after the first real mod lands. Should the spike be deleted, or kept for re-checking new builds? The exemption entry is in a protected file, so only the owner can remove it.
+3. **The spike after Gate A (P1.0b).** `CLAUDE.md` says to retire the spike and its coverage exemption once Gate A closes, in two PRs and only after the first real mod lands. Should the spike be deleted, or kept for re-checking new builds? The exemption entry is in a protected file, so only the owner can remove it.
 
 ## M0. Scaffold
-- [ ] P1.0 **Scaffold the mod** (F12, F14). Create `taskmaster/.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`, `types/` and `tests/`, with a test `engine()` helper like the spike's. Add the Phase 1 keys of `userConfig` (F12). At `session.start`, build the `Io` table and flush buffered early events. A startup self-check logs which events fired on this build (F14). **Red:** loading the mod registers `session.start`, and the self-check records the events it saw. The config defaults match F12. **Done:** coverage ≥ 95%, validate and typecheck pass, and the mod loads in a terminal with nothing visible.
-- [ ] P1.0b **Retire the spike** (owner decision, open question 3; only after P1.0 is merged). If the owner chooses deletion: the owner removes the `spike/taskmaster-spike` entry from `coverage-exempt.json`, then a PR deletes `spike/` and updates the paths in `CLAUDE.md` and `README.md`. The Gate A record already lives in plan §10.1.
+- [ ] P1.0 **Scaffold the mod** (F12, F14). Create `taskmaster/.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`, `types/` and `tests/`, with a test `engine()` helper like the spike's. Add the Phase 1 keys of `userConfig` (F12). At `session.start`, build the `Io` table and flush buffered early events. A startup self-check logs which events fired on this build (F14).
+  - **Waits for** the owner's fix to `.github/workflows/mod-coverage.yml:13`, the push filter that gives `main` a coverage baseline. PR #5, merged as `51f0959`, changed it to `branches: [main]`.
+  - **The first coverage report.** Every mod so far has been exempt. So the gate has printed "No coverage report: every mod measured here is exempt.", and the "Upload coverage to GitHub" step has been skipped. P1.0 is the first PR to write `coverage/cobertura-coverage.xml`, which makes it the first live run of that upload step (`actions/upload-code-coverage`, with `fail-on-error: false`, so upload errors stay warnings) and of the ruleset's `code_coverage` rule. Report what they actually do, and record it under this task:
+    - whether the upload succeeds or only warns,
+    - whether the rule reports on the PR,
+    - whether the rule compares against a baseline from `main`.
+
+  **Red:** loading the mod registers `session.start`, and the self-check records the events it saw. The config defaults match F12. **Done:** coverage ≥ 95%, validate and typecheck pass, and the mod loads in a terminal with nothing visible.
+- [ ] P1.0b **Retire the spike** (owner decision, open question 3). If the owner chooses deletion, use two PRs, in this order, and only after P1.0 is merged:
+  1. **Delete `spike/`.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`scripts/mod-coverage.mjs:331`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
+  2. **Remove the exemption entry.** A second PR deletes the `spike/taskmaster-spike` entry from `coverage-exempt.json`. That file is protected: Claude can't edit it (`.claude/settings.json`), and `gate-guard` fails the PR until the owner lifts that check in the ruleset for it. `main` takes no direct pushes, so this step is a PR too.
+
+  Don't reverse the order. Removing the entry while `spike/` exists fails `mod-coverage`, because the spike is at 61.58% (`scripts/mod-coverage.mjs:281`).
 
 ## M1. Contract compiler (F1)
 - [ ] P1.1 **Capture and attribute** (F1.1). On `skill.prompt`, capture the skill, its text, frontmatter, source, plugin name, path and a content hash. Attribute it to a loop: through the `Skill` tool's `tool.call.agentId`, through `agent.spawn` for preloaded skills, or to the main loop for a typed `/name` (spike: `skill-attribution`). **Red:** one test per attribution path. *Depends on P1.0.*

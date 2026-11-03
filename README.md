@@ -1,6 +1,6 @@
 # <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg"><img src="docs/assets/hero-light.svg" width="760" alt="Taskmaster: a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. Planned, not installable yet."></picture>
 
-**Planned, not installable yet.** Taskmaster is a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. It isn't built, and there's no install command. This repository holds its design and a Phase 0 spike that's testing whether the design can work. That go/no-go check, Gate A, is still open, so everything below describes what's planned.
+**Planned, not installable yet.** Taskmaster is a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. It isn't built, and there's no install command. This repository holds its design and a Phase 0 spike that tested whether the design can work. That go/no-go check, Gate A, passed on 2026-11-03, so the first version (Phase 1) is next. Everything below describes what's planned.
 
 Taskmaster's promise: Claude never silently skips a declared step, never claims completion without matching evidence, and never loses its place across compaction or a new session.
 
@@ -94,8 +94,8 @@ A skill's steps become tasks. Taskmaster records what happens, checks that recor
 
 | Stage | What it holds | State |
 | --- | --- | --- |
-| Phase 0: spike | An observe-only mod with one-shot probes that tests whether the design can work | Built. Gate A is still open |
-| Phase 1: first version | Steps from the skill, the evidence record, gates on completing or deleting a task and on stopping, recorded skips, checkpoints and resume, the status line and summary, metrics, and the frontmatter advisor for one skill | Planned |
+| Phase 0: spike | An observe-only mod with one-shot probes that tests whether the design can work | Built. Gate A passed (GO, 2026-11-03) |
+| Phase 1: first version | Steps from the skill, the evidence record, gates on completing or deleting a task and on stopping, recorded skips, checkpoints and resume, the status line and summary, metrics, and the frontmatter advisor for one skill | Planned, and next ([task list](docs/phase-1-tasks.md)) |
 | Phase 2 onward | Holding Claude to a plan before it writes, subagent enforcement, warnings for unrequested work, an advisory audit, a side pane, and marketplace install | Planned |
 
 The thresholds in the design plan are targets for a later trial, not results.
@@ -168,7 +168,8 @@ The gate reads its numbers from what tests print, so a test written to print fak
 
 - [Design plan](docs/taskmaster-plan.md): the features, the build order and the go/no-go gates.
 - [Spike runbook](spike/taskmaster-spike/RUNBOOK.md): how to run each probe and read its result.
-- [Gate A checklist](spike/taskmaster-spike/GATE-A-TASKS.md): the work still open on the spike.
+- [Gate A checklist](spike/taskmaster-spike/GATE-A-TASKS.md): the spike's finished run, with the evidence for each check. The result is in plan §10.1.
+- [Phase 1 task list](docs/phase-1-tasks.md): the tasks for the first version, in build order.
 - [`CLAUDE.md`](CLAUDE.md): commands, architecture and the test-first workflow.
 - [Changelog](CHANGELOG.md): notable changes.
 
