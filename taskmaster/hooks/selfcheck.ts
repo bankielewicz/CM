@@ -75,8 +75,7 @@ export class SelfCheck {
   // One save at a time. A note made while one runs asks for one more, which
   // runs after it and saves the latest events.
   private queue(): void {
-    const started = this.started
-    if (!started) return
+    if (!this.started) return
     if (this.saving) {
       this.again = true
       return
@@ -84,7 +83,7 @@ export class SelfCheck {
     this.saving = (async () => {
       do {
         this.again = false
-        await this.save(started)
+        await this.save(this.started as Started) // read on each pass
       } while (this.again)
       this.saving = undefined
     })()
