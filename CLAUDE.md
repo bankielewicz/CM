@@ -42,7 +42,7 @@ How the bar is enforced:
 - `scripts/mod-coverage.mjs` measures under the real kit by instrumenting a temporary copy, because `claude plugin test` has no coverage option and silently ignores flags it doesn't know. Hook files no test loads count as 0%, and `istanbul ignore` comments have no effect.
 - A Stop hook (`.claude/settings.json`, `scripts/coverage-stop-hook.mjs`) blocks the end of a turn when a mod's `hooks/` or `tests/` differ from what's pushed and that mod is under the bar.
 - `.github/workflows/mod-coverage.yml` runs the gate on every PR and uploads Cobertura for the ruleset's "Restrict code coverage" rule. Its `mod-coverage` job is a required check, so keep that job name and don't give the workflow a `paths:` filter: a required check that gets filtered out never reports.
-- `coverage-exempt.json` excuses a mod from the percentage, with a reason. It's still measured and printed, failing tests still fail it, and it stays out of the uploaded report. Only the owner decides an exemption.
+- `coverage-exempt.json` excuses a mod from the percentage, with a reason. It's still measured and printed, failing tests still fail it, and it stays out of the uploaded report. Only the owner decides an exemption. With every mod exempt, as now, the gate writes no report and the upload is skipped. The coverage rule didn't block PR #1 without one, so the `mod-coverage` check is what enforces the bar.
 - The 95 lives in `THRESHOLD` in `scripts/mod-coverage.mjs` and in the GitHub ruleset, so change them together. If the bar can't be met, ask; don't lower it or exclude files.
 
 ## Spike architecture
