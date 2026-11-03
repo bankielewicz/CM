@@ -13,6 +13,7 @@ export type CheckId =
   | 'compaction-events'
   | 'check-call-order'
   | 'readonly-query'
+  | 'check-every-mode'
   | 'skill-attribution'
   | 'plugin-skills-folder'
   | 'git-commit-only'

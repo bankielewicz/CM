@@ -9,7 +9,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ProcessRunResult, Register, ToolCallArgs, ToolCallResult } from 'claude-code'
 
 import type { Check, CheckId, CheckStatus, Checks, Counters } from '../types'
-import { CHECKS, formatReport, formatStatus, glyph } from './checks'
+import { CHECKS, formatReport, formatStatus, glyph, modeVerdict } from './checks'
+import type { ModeTally } from './checks'
 import { Journal } from './journal'
 import type { JournalEvent, JournalIo } from './journal'
 import { asRecord, asString, clip, MARK, shortHash } from './util'
@@ -39,7 +40,7 @@ type ProbeName =
   | 'deny-complete'
   | 'taskcompleted-block'
 
-type Probe = { firedAt?: number; agentId?: string; taskId?: string; tool?: string }
+type Probe = { firedAt?: number; agentId?: string; taskId?: string; tool?: string; stopActive?: boolean }
 
 type TaskMark = { id: string; subject: string }
 
@@ -52,6 +53,8 @@ type Findings = {
   snapshots: Snapshot[]
   attribution: Record<string, number>
   sessions: string[]
+  /** Main-loop model tool calls by permission mode, and how many had a tool.check. */
+  modes: ModeTally
 }
 
 type OpenCall = { tool: string; agentId?: string; skill?: string; seq: number }
@@ -100,7 +103,15 @@ export const register: Register = on => {
   let dir = DIR
   const findingsPath = (): string => `${dir}/findings.json`
   const reportPath = (): string => `${dir}/FINDINGS.md`
-  let findings: Findings = { schema: 1, checks: {}, sources: [], snapshots: [], attribution: {}, sessions: [] }
+  let findings: Findings = {
+    schema: 1,
+    checks: {},
+    sources: [],
+    snapshots: [],
+    attribution: {},
+    sessions: [],
+    modes: {},
+  }
   const probes = new Map<ProbeName, Probe>()
   const openCalls = new Map<string, OpenCall>()
   const order = { inside: 0, before: 0, sampled: 0 }
@@ -110,6 +121,14 @@ export const register: Register = on => {
   // Real (model) calls whose tool.check carried isReadOnly, by tool.
   const realReadOnly: Record<string, number> = {}
   const openSpawns = new Set<string>()
+  // Agents started through the Agent tool (agent.spawn's agentId). The
+  // engine's own helper agents (compaction summarizer, prompt-side helpers)
+  // also raise SubagentStop, with an empty agent_type, but are never spawned.
+  const spawnedAgents = new Set<string>()
+  // Main-loop model calls whose tool.check has run, until their tool.call ends.
+  const checkedCalls = new Set<string>()
+  // The permission mode the classic hooks last reported (permission_mode).
+  let mode = 'unknown'
   let lastSpawnSeq = -100
   let lastTyped: { name: string; seq: number } | undefined
   let seeded: TaskMark | undefined
@@ -161,6 +180,7 @@ export const register: Register = on => {
         snapshots: Array.isArray(record.snapshots) ? (record.snapshots as Snapshot[]) : [],
         attribution: asRecord(record.attribution) as Record<string, number>,
         sessions: Array.isArray(record.sessions) ? record.sessions.map(String) : [],
+        modes: asRecord(record.modes) as ModeTally,
       }
     }
     await io.setChecks(findings.checks)
@@ -306,12 +326,7 @@ export const register: Register = on => {
     if (queriesSeen === 0) {
       // The mod's own tool.check hook is not run on its own query, so a
       // query cannot reveal isReadOnly; the real call's tool.check can.
-      await setCheck(
-        'readonly-query',
-        'info',
-        `The mod's own tool.check hook saw 0 of ${samples.length} of its $.tool.check queries, so a query can't read isReadOnly. ` +
-          `Use the real call's tool.check instead: ${realReadOnlySummary()}.`,
-      )
+      await setCheck('readonly-query', 'info', noQueryEvidence(samples.length))
       return
     }
     const reads = samples.filter(c => queryResults[c]).map(c => `"${c}"`)
@@ -329,6 +344,48 @@ export const register: Register = on => {
     return entries.length === 0
       ? 'no real call has carried isReadOnly yet'
       : `isReadOnly carried on real calls to ${entries.map(([tool, n]) => `${tool} ×${n}`).join(', ')}`
+  }
+
+  const NO_QUERY = "The mod's own tool.check hook saw 0 of"
+
+  function noQueryEvidence(samples: number): string {
+    return (
+      `${NO_QUERY} ${samples} of its $.tool.check queries, so a query can't read isReadOnly. ` +
+      `Use the real call's tool.check instead: ${realReadOnlySummary()}.`
+    )
+  }
+
+  // While readonly-query rests on real calls, keep its evidence as current
+  // as the counts it quotes (it was otherwise written once, at start).
+  async function refreshReadOnlyRow(): Promise<void> {
+    const row = findings.checks['readonly-query']
+    if (Object.keys(realReadOnly).length > 0 && row?.status === 'info' && row.evidence.startsWith(NO_QUERY)) {
+      const samples = Number(/saw 0 of (\d+)/.exec(row.evidence)?.[1] ?? 3)
+      await setCheck('readonly-query', 'info', noQueryEvidence(samples))
+    }
+  }
+
+  function noteMode(reported: string | undefined): void {
+    if (reported) {
+      mode = reported
+    }
+  }
+
+  function tallyMode(hadCheck: boolean): void {
+    const was = findings.modes[mode] ?? { calls: 0, checked: 0 }
+    const now = { calls: was.calls + 1, checked: was.checked + (hadCheck ? 1 : 0) }
+    findings = { ...findings, modes: { ...findings.modes, [mode]: now } }
+  }
+
+  async function noteModes(): Promise<void> {
+    if (Object.keys(findings.modes).length === 0) {
+      return
+    }
+    const verdict = modeVerdict(findings.modes)
+    const row = findings.checks['check-every-mode']
+    if (row?.status !== verdict.status || row.evidence !== verdict.evidence) {
+      await setCheck('check-every-mode', verdict.status, verdict.evidence)
+    }
   }
 
   async function probeGit(): Promise<string> {
@@ -576,6 +633,7 @@ export const register: Register = on => {
 
   on('classic.SessionStart', async ($, e, next) => {
     sessionId = e.session_id || sessionId
+    noteMode(e.permission_mode)
     noteSession()
     await log({ kind: 'classic.SessionStart', source: e.source, model: e.model ?? null, isReady: io !== undefined })
     await noteSource(e.source)
@@ -650,6 +708,16 @@ export const register: Register = on => {
     if (e.agentId && answer.includes(MARK.preload)) {
       await log({ kind: 'preload.answer', agentId: e.agentId })
     }
+    const subProbe = probes.get('subagent-stop-block')
+    if (e.agentId && subProbe?.firedAt !== undefined && subProbe.agentId === e.agentId) {
+      const isPass = answer.includes(MARK.subContinued)
+      probes.delete('subagent-stop-block')
+      await setCheck(
+        'subagent-stop-block',
+        isPass ? 'pass' : 'fail',
+        `After the block subagent ${e.agentId.slice(0, 8)} (${subProbe.tool ?? '?'}) ${isPass ? 'continued and ended with' : 'ended without'} ${MARK.subContinued}; stop_hook_active on its next stop: ${String(subProbe.stopActive ?? 'not seen')}; turn ended: ${e.reason}.`,
+      )
+    }
     await pushCounters()
     refreshStatus()
     return next(e)
@@ -669,8 +737,16 @@ export const register: Register = on => {
 
   // ------------------------------------------------------------- compaction
 
+  // session.compact wraps a compaction: it starts before PreCompact and its
+  // next() returns after PostCompact. So a compaction starts the list there;
+  // PreCompact starts it only when no session.compact is open.
+  const isCompactOpen = (): boolean =>
+    compactSeen.includes('session.compact') && !compactSeen.includes('session.compact.done')
+
   on('classic.PreCompact', async ($, e, next) => {
-    compactSeen.length = 0
+    if (!isCompactOpen()) {
+      compactSeen.length = 0
+    }
     compactSeen.push('PreCompact')
     await log({ kind: 'classic.PreCompact', trigger: e.trigger })
     await journal?.flush()
@@ -678,6 +754,7 @@ export const register: Register = on => {
   })
 
   on('session.compact', async ($, e, next) => {
+    compactSeen.length = 0
     compactSeen.push('session.compact')
     await log({
       kind: 'session.compact',
@@ -687,7 +764,9 @@ export const register: Register = on => {
       hasInstructions: e.instructions !== undefined,
     })
     const result = await next(e)
+    compactSeen.push('session.compact.done')
     await log({ kind: 'session.compact.done', skipped: typeof result.skip === 'string' ? result.skip : null })
+    await noteCompaction()
     return result
   })
 
@@ -723,6 +802,10 @@ export const register: Register = on => {
       order.before += 1
     }
     order.sampled += 1
+    if (!e.agentId) {
+      checkedCalls.add(id)
+    }
+    const isNewReadTool = e.isReadOnly === true && realReadOnly[e.tool] === undefined
     if (e.isReadOnly === true) {
       realReadOnly[e.tool] = (realReadOnly[e.tool] ?? 0) + 1
     }
@@ -740,6 +823,9 @@ export const register: Register = on => {
         'info',
         `Of ${order.sampled} model tool calls: tool.check ran inside tool.call (after it started, before next() returned) ${order.inside}×, before tool.call ${order.before}×; ${realReadOnlySummary()}.`,
       )
+    }
+    if (isNewReadTool || order.sampled === 5 || order.sampled % 25 === 0) {
+      await refreshReadOnlyRow()
     }
     return verdict
   })
@@ -802,6 +888,9 @@ export const register: Register = on => {
       result = await next(e)
     } finally {
       openCalls.delete(id)
+    }
+    if (!isOwn && !e.agentId && e.tool_use_id !== undefined) {
+      tallyMode(checkedCalls.delete(e.tool_use_id))
     }
     const r = asRecord(result)
     await log({
@@ -882,6 +971,13 @@ export const register: Register = on => {
 
   // --------------------------------------------------------------- stop hooks
 
+  // The mode at the start of each turn, which the turn's tool calls run in.
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    noteMode(e.permission_mode)
+    await log({ kind: 'classic.UserPromptSubmit', mode: e.permission_mode ?? null })
+    return next(e)
+  })
+
   on('classic.Stop', async ($, e, next) => {
     counters = { ...counters, stops: counters.stops + 1 }
     const message = e.last_assistant_message ?? ''
@@ -889,9 +985,12 @@ export const register: Register = on => {
       kind: 'classic.Stop',
       isActive: e.stop_hook_active,
       length: message.length,
+      mode: e.permission_mode ?? null,
       background: e.background_tasks?.length ?? 0,
       crons: e.session_crons?.length ?? 0,
     })
+    await noteModes()
+    noteMode(e.permission_mode)
     const probe = probes.get('stop-block')
     if (probe && probe.firedAt === undefined) {
       probes.set('stop-block', { firedAt: await $.clock.now() })
@@ -919,33 +1018,35 @@ export const register: Register = on => {
 
   on('classic.SubagentStop', async ($, e, next) => {
     const message = e.last_assistant_message ?? ''
+    const isSpawned = spawnedAgents.has(e.agent_id)
     await log({
       kind: 'classic.SubagentStop',
       agentId: e.agent_id,
       agentType: e.agent_type,
+      isSpawned,
       isActive: e.stop_hook_active,
       length: message.length,
     })
+    // Only an agent Claude started through the Agent tool: the engine's own
+    // helper agents (empty agent_type) stop constantly and must not be blocked.
     const probe = probes.get('subagent-stop-block')
-    if (probe && probe.firedAt === undefined) {
-      probes.set('subagent-stop-block', { firedAt: await $.clock.now(), agentId: e.agent_id })
+    if (probe && probe.firedAt === undefined && isSpawned) {
+      probes.set('subagent-stop-block', { firedAt: await $.clock.now(), agentId: e.agent_id, tool: e.agent_type })
       await setCheck(
         'subagent-stop-block',
         'pending',
-        `Blocked subagent ${e.agent_id.slice(0, 8)}'s stop once; waiting for it to continue.`,
+        `Blocked subagent ${e.agent_id.slice(0, 8)} (${e.agent_type})'s stop once; waiting for its answer.`,
       )
+      await log({ kind: 'probe.fired', probe: 'subagent-stop-block', agentId: e.agent_id })
       return {
         block: `TASKMASTER-SPIKE PROBE: the taskmaster-spike mod blocked this subagent's stop on purpose. Add the word ${MARK.subContinued} at the end of your final answer, then stop.`,
       }
     }
+    // Its next stop comes before its turn.complete, which carries the answer
+    // (last_assistant_message is empty for spawned agents): note the stop and
+    // decide in turn.complete.
     if (probe?.firedAt !== undefined && probe.agentId === e.agent_id) {
-      const isPass = message.includes(MARK.subContinued)
-      probes.delete('subagent-stop-block')
-      await setCheck(
-        'subagent-stop-block',
-        isPass ? 'pass' : 'fail',
-        `After the block subagent ${e.agent_id.slice(0, 8)} (${e.agent_type}) ${isPass ? 'continued and said' : 'stopped without'} ${MARK.subContinued}; stop_hook_active: ${String(e.stop_hook_active)}.`,
-      )
+      probes.set('subagent-stop-block', { ...probe, stopActive: e.stop_hook_active })
     }
     return next(e)
   })
@@ -964,6 +1065,9 @@ export const register: Register = on => {
     })
     try {
       const spawned = await next(e)
+      if (spawned.agentId) {
+        spawnedAgents.add(spawned.agentId)
+      }
       await log({
         kind: 'agent.spawned',
         agentId: spawned.agentId ?? null,
@@ -1037,7 +1141,7 @@ export const register: Register = on => {
         return { text: 'Opened the Taskmaster spike pane.' }
       case 'reset':
         probes.clear()
-        findings = { ...findings, checks: {}, attribution: {}, sources: [], snapshots: [] }
+        findings = { ...findings, checks: {}, attribution: {}, sources: [], snapshots: [], modes: {} }
         await io?.setChecks(findings.checks)
         await saveFindings()
         refreshStatus()

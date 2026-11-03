@@ -8,16 +8,16 @@ This is the durable copy of the Gate A close-out task list. Claude's built-in ta
 
 ## 1. Fix the spike and record what was learned (Claude)
 - [x] 1.0 Write this checklist [#1]
-- [ ] 1.1 `subagent-stop-block`: fire only for agents spawned through the Agent tool (a `spawnedAgents` set filled from `agent.spawned`). Ignore helper agents with an empty `agentType`, including the compaction summarizer. [#2]
-- [ ] 1.2 `subagent-stop-block`: pass when that agent's `turn.complete` answer has `SPIKE-SUB-CONTINUED`, and fail at its second SubagentStop without it. `last_assistant_message` is empty for real subagents. [#3]
-- [ ] 1.3 `compaction-events`: reset `compactSeen` at `session.compact` (it fires first and wraps the compaction), not at PreCompact. Log `session.compact.done`. [#4]
-- [ ] 1.4 `readonly-query`: keep its evidence current from real calls' `isReadOnly`. [#5]
-- [ ] 1.5 New check `check-every-mode`: count model `tool.call` against `tool.check` per session, plus `permission_mode` when a payload carries it. [#6]
-- [ ] 1.6 Tests for 1.1–1.5 in `tests/spike.test.ts` [#7]
-- [ ] 1.7 RUNBOOK: subagent-probe notes, `/compact` before `/clear`, the tasklist-persist warning, the bypass step, the new check [#8]
-- [ ] 1.8 `docs/taskmaster-plan.md`: add the new learnings, and rewrite the §10.1 deny row with the softer subagent rule [#9]
-- [ ] 1.9 `claude plugin validate`, `tsc -p`, `claude plugin test`: all green [#10]
-- [ ] 1.10 Commit and push to `claude/jolly-thompson-5z0tnc`. The mod hot-reloads, which forgets armed probes and keeps results. [#11]
+- [x] 1.1 `subagent-stop-block`: fire only for agents spawned through the Agent tool (a `spawnedAgents` set filled from `agent.spawned`). Ignore helper agents with an empty `agentType`, including the compaction summarizer. [#2]
+- [x] 1.2 `subagent-stop-block`: decide at that agent's `turn.complete`: pass if the answer has `SPIKE-SUB-CONTINUED`, fail if it doesn't. Its second SubagentStop comes first and only records `stop_hook_active`. `last_assistant_message` is empty for real subagents. [#3]
+- [x] 1.3 `compaction-events`: reset `compactSeen` at `session.compact` (it fires first and wraps the compaction), not at PreCompact. Log `session.compact.done`. [#4]
+- [x] 1.4 `readonly-query`: keep its evidence current from real calls' `isReadOnly`. [#5]
+- [x] 1.5 New check `check-every-mode`: count main-loop model calls, and how many had a `tool.check`, per permission mode (`permission_mode` from UserPromptSubmit, Stop and SessionStart). It passes on 5+ bypass calls that all had one. [#6]
+- [x] 1.6 Tests for 1.1–1.5 in `tests/spike.test.ts` [#7]
+- [x] 1.7 RUNBOOK: subagent-probe notes, `/compact` before `/clear`, the tasklist-persist warning, the bypass step, the new check [#8]
+- [x] 1.8 `docs/taskmaster-plan.md`: add the new learnings, and rewrite the §10.1 deny row with the softer subagent rule [#9]
+- [x] 1.9 `claude plugin validate`, `tsc -p`, `claude plugin test`: all green [#10]
+- [x] 1.10 Commit and push to `claude/jolly-thompson-5z0tnc`. The mod hot-reloads, which forgets armed probes and keeps results. [#11]
 
 ## 2. Remaining probes, one at a time (you arm, Claude answers)
 - [ ] 2.1 `/tm-spike status`: the mod reloaded and nothing is armed [#12]

@@ -141,7 +141,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
   It may fail closed, and every deny message ends with the waive instruction. `classic.TaskCompleted` → `{ block }` is a backstop for completions that bypass `TaskUpdate`.
 - **G2: deleting a contract step's task (`TaskUpdate status=deleted`)** is denied and redirected to `taskmaster_waive`, so a step can't vanish silently.
 - **G3: Stop (`classic.Stop`)** blocks when the active `enforce` contract has steps owned by this loop that are uncovered, pending, or in progress. Its reason lists the step ids and the three ways out: do it, waive it, or `await_user`. It fails open.
-- **G4: subagent stop (`classic.SubagentStop`)** does the same, scoped to the tasks that subagent owns.
+- **G4: subagent stop (`classic.SubagentStop`)** does the same, scoped to the tasks that subagent owns. It gates only agents the mod saw started through `agent.spawn`, never the engine's own helper agents, such as the compaction summarizer (§9, learned in the spike).
 - **Plan Gate:** under an `enforce` contract, write calls (`Edit`, `Write`, `NotebookEdit`, non-read-only Bash or MCP tools, read-only taken from `tool.check`) are denied until every mandatory step has a task. Read-only calls, task tools, the mod's own tools, and `AskUserQuestion` are always allowed.
 
 ### F5. Stop gate safety: loop limits and legitimate exits
@@ -531,8 +531,12 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 - **State references need literals.** `atom({ plugin, key })` must name the plugin and key as string literals, not constants.
 - **Relative `$.fs` paths follow the session's *current* working directory, and a shell `cd` moves it** (seen live: one `cd` sent a journal write to `.taskmaster/spike/.taskmaster/spike/`). `$.session.root()` is not moved by a shell `cd`, so the real mod anchors every `.taskmaster/` path to it, and so does the spike now. Under `claude plugin test`, the working directory is the plugin folder.
 - **`git commit --only` needs a prior `git add`** for new files (see F8.1).
-- **A mod's own `tool.check` hook isn't run on its own `$.tool.check` query** (observed live in the loaded spike). So the Plan Gate can't ask "is this read-only?" from inside `tool.call`. Instead it decides in the real call's `tool.check`, which runs inside `tool.call` and carries `isReadOnly`, answering `{ decision: 'deny' }` there. The spike now records which real calls carry the flag. Phase 0 must still confirm that `tool.check` fires in every permission mode, including bypass.
+- **A mod's own `tool.check` hook isn't run on its own `$.tool.check` query** (observed live in the loaded spike). So the Plan Gate can't ask "is this read-only?" from inside `tool.call`. Instead it decides in the real call's `tool.check`, which runs inside `tool.call` and carries `isReadOnly`, answering `{ decision: 'deny' }` there. Real calls do carry it: on 2.1.317, read-only Bash commands (`cat`, `grep`, `ls`) arrived with `isReadOnly`, and `python3 -c` didn't. The spike's `check-every-mode` check confirms that `tool.check` fires in every permission mode, bypass included (RUNBOOK §5).
 - **The validator lists every "gating hook without .catch"** (tool.call, Stop, compaction, ...). An observer that throws is skipped, which fails open. That suits the spike and the real mod's Stop gate; only the `TaskUpdate` gate gets a `.catch`.
+- **`session.compact` wraps a compaction** (seen live on 2.1.317). It starts before `classic.PreCompact`, and its `next()` returns after `classic.PostCompact`. In between come the summarizer's SubagentStop and then `SessionStart(compact)`, which fires *before* PostCompact. So the checkpointer writes at PreCompact (or before session.compact's `next()`), and the resume briefing can be built at `SessionStart(compact)`.
+- **The engine's own helper agents raise SubagentStop.** On 2.1.317, 30 of 32 SubagentStop events came from agents with an empty `agent_type` that no Agent call started (the compaction summarizer and small helpers that run around each prompt). G4 must gate only agents whose `agentId` it saw from `agent.spawn`. Otherwise it would block those helpers, including the compaction summarizer.
+- **A subagent's answer comes from `turn.complete`, not SubagentStop.** For a spawned agent, `last_assistant_message` is empty. After a block, the agent's next SubagentStop fires before its `turn.complete`, and that event carries the whole report as `answer`, with `agentId`. G4's question detection and any check of a subagent's answer read it there.
+- **Classic hook payloads carry `permission_mode`** (UserPromptSubmit, Stop, SessionStart, SubagentStop). The mod reads the mode a turn's calls run in from UserPromptSubmit.
 
 → **Gate A (technical go/no-go, §10.1).**
 
@@ -570,7 +574,8 @@ Write the thresholds down before the evaluation runs and don't move them during 
 | Check | If it fails |
 | --- | --- |
 | A `classic.Stop` `block` reliably makes Claude continue | **No-go for enforcement.** Pivot to an advisory "report card" mod (checkpoints, metrics, and a summary below each answer). |
-| `tool.call` `deny` on `TaskUpdate` and write tools is reliable on the main loop and in subagents | **No-go for G1 and the Plan Gate.** Keep only Stop-based enforcement. |
+| `tool.call` `deny` on `TaskUpdate` and write tools is reliable on the main loop | **No-go for G1 and the Plan Gate.** Keep only Stop-based enforcement. |
+| The same `deny` is reliable in subagents | Not a no-go: G1 and the Plan Gate cover the main loop only, and the subagent gap is documented. Phase 1 is main-loop only anyway; subagent ownership and G4 are Phase 2. |
 | `$.tool.call(TaskCreate)` seeds tasks Claude sees | Fallback: the footer tells Claude to create them, and the Plan Gate enforces it. Not a no-go. |
 | Whether the built-in task list persists across sessions | Expected not to; the checkpoint rebuilds it. Not a no-go. |
 | `SessionStart.source` after `/clear` and after auto-compaction | Adapt the resume triggers. Not a no-go. |

@@ -114,6 +114,14 @@ export const CHECKS: readonly CheckInfo[] = [
     isBlocking: false,
   },
   {
+    id: 'check-every-mode',
+    title: 'tool.check fires for every model call, in every permission mode',
+    answers: 'Plan Gate placement (Phase 0 note: bypass included)',
+    how: 'Automatic: tool use in each mode; run one session in bypassPermissions with 5+ tool calls',
+    ifFails: 'Plan Gate denies in tool.call from a conservative write-tool list for that mode',
+    isBlocking: false,
+  },
+  {
     id: 'skill-attribution',
     title: 'Skill loads attributed to a loop (main, subagent, preload, typed)',
     answers: 'Phase 0 #6',
@@ -177,6 +185,37 @@ export function formatStatus(checks: Checks): string {
     'Probes: /tm-spike probe <stop-block|subagent-stop-block|deny-write|deny-write-subagent|deny-complete|taskcompleted-block|seed-task|readonly-query|git-commit-only|journal-stress>',
     'Report: /tm-spike report  ·  Pane: /tm-spike pane',
   ].join('\n')
+}
+
+/** Main-loop model tool calls per permission mode, and how many had a tool.check. */
+export type ModeTally = Record<string, { calls: number; checked: number }>
+
+export const BYPASS = 'bypassPermissions'
+const BYPASS_SAMPLE = 5
+
+/**
+ * check-every-mode: passes once a bypassPermissions session showed a
+ * tool.check for each of at least five calls; fails when bypass skipped one.
+ * A miss in another mode is reported but doesn't decide the check.
+ */
+export function modeVerdict(modes: ModeTally): { status: CheckStatus; evidence: string } {
+  const seen = Object.entries(modes).filter(([, t]) => t.calls > 0)
+  const list = seen.map(([mode, t]) => `${mode} ${t.checked}/${t.calls}`).join(', ')
+  const missed = seen.filter(([, t]) => t.checked < t.calls).map(([mode]) => mode)
+  const head = `Main-loop model calls that had a tool.check, by permission mode: ${list || 'none yet'}.`
+  const misses = missed.length > 0 ? ` Skipped in: ${missed.join(', ')}.` : ''
+  const bypass = modes[BYPASS]
+
+  if (bypass && bypass.checked < bypass.calls) {
+    return { status: 'fail', evidence: `${head}${misses}` }
+  }
+  if (bypass && bypass.calls >= BYPASS_SAMPLE) {
+    return { status: 'pass', evidence: `${head}${misses} bypassPermissions ran tool.check on every call.` }
+  }
+  return {
+    status: 'info',
+    evidence: `${head}${misses} Still needed: ${BYPASS_SAMPLE}+ tool calls in a bypassPermissions session.`,
+  }
 }
 
 export function gateVerdict(checks: Checks): string {

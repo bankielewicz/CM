@@ -31,7 +31,9 @@ Arm a probe, then send the prompt shown. Run one probe at a time.
 | `/tm-spike probe taskcompleted-block` | `Create a task called spike backstop, mark it in progress, then mark it completed.` | `taskcompleted-block` | The `TaskCompleted` block vetoes the completion, and `TaskGet` doesn't read `completed` |
 | `/tm-spike probe seed-task` | `List your tasks.` | `seed-task` | Claude's own `TaskList` shows the task the mod created |
 | `/tm-spike probe deny-write-subagent` | `Use a subagent to create a file named spike-deny-sub.txt containing hello.` | `deny-write-subagent` | The subagent's write is denied |
-| `/tm-spike probe subagent-stop-block` | `Use a subagent to read docs/taskmaster-plan.md and summarise it in one line.` | `subagent-stop-block` | The subagent is blocked once, continues, and ends with `SPIKE-SUB-CONTINUED` |
+| `/tm-spike probe subagent-stop-block` | `Use a subagent to read docs/taskmaster-plan.md and summarise it in one line.` | `subagent-stop-block` | The subagent Claude spawns is blocked once, continues, and its final answer (read from its `turn.complete`) ends with `SPIKE-SUB-CONTINUED` |
+
+**About the subagent probes.** Claude Code's own helper agents (the compaction summarizer, and small helpers that run around each prompt) raise SubagentStop too, with an empty agent type. `subagent-stop-block` ignores them and fires only for an agent started through the Agent tool. On 2.1.317, a spawned agent's SubagentStop has an empty `last_assistant_message`, and its second stop comes *before* its `turn.complete`. So the probe judges the marker from `turn.complete`'s answer, and reports `stop_hook_active` from the second stop.
 
 ## 3. Skills: does a plugin's `skills/` folder load, and which loop is a skill attributed to?
 
@@ -44,13 +46,23 @@ Send these three prompts:
 
 ## 4. Compaction, `/clear`, and a new session
 
-1. Run `/compact`. This answers `compaction-events` (the order of PreCompact → session.compact → PostCompact) and adds `compact` to `sessionstart-source`.
-2. Ask `Create a task called persistence check.`, then run `/clear`. About 3 s later the mod lists the tasks again. This answers `tasklist-persist` (PERSISTS or DOES NOT PERSIST) and adds `clear` to `sessionstart-source`.
+Run these in this order. `/clear` clears the conversation, and may clear the task list too (which is what `tasklist-persist` tests), so it goes last.
+
+1. Run `/compact`. This answers `compaction-events` and adds `compact` to `sessionstart-source`. On 2.1.317 the order is session.compact (start) → PreCompact → the summarizer's SubagentStop → SessionStart(compact) → PostCompact → session.compact.done: `session.compact` wraps the whole compaction.
+2. Ask `Create a task called persistence check.`, then run `/clear`. About 3 s later the mod lists the tasks again. This answers `tasklist-persist` (PERSISTS or DOES NOT PERSIST) and adds `clear` to `sessionstart-source`. **Don't edit the mod between these two steps.** A hot reload forgets the tasks the mod has seen, so the old session would be recorded with none, and there'd be nothing to compare.
 3. Optional: quit, start a brand-new session in the same folder, and run `/tm-spike status` again. Results carry over through `.taskmaster/spike/findings.json`.
 
 `check-call-order` fills in by itself after a few tool calls of any kind.
 
-## 5. Report
+## 5. A session in bypass permissions mode
+
+The Plan Gate decides in the real call's `tool.check`, so `tool.check` has to fire in every permission mode, bypass included. `check-every-mode` counts main-loop model tool calls per permission mode (read from `permission_mode` on UserPromptSubmit, Stop and SessionStart) and how many of them had a `tool.check`. It updates at the end of each turn.
+
+1. Start a session in bypass permissions mode with the spike loaded, for example `claude --permission-mode bypassPermissions --plugin-dir ./spike/taskmaster-spike`, or switch the session's mode to bypass.
+2. Ask for anything that makes at least 5 tool calls (for example `List the files in spike/taskmaster-spike and read its README.`).
+3. Run `/tm-spike status`. `check-every-mode` passes when bypassPermissions shows `N/N` with N ≥ 5, and fails if bypass skipped a `tool.check`. A miss in another mode is listed but doesn't decide the check.
+
+## 6. Report
 
 Run `/tm-spike report`. It writes `.taskmaster/spike/FINDINGS.md`: one row per check (result, evidence, and the plan's fallback), plus the **Gate A verdict**:
 
@@ -71,3 +83,4 @@ It never stores prompt text, file contents, or tool output. Secrets matching kno
 - Skill attribution is inferred from what else is open at the time (a Skill call, an Agent call, a recent spawn, a typed command), because `skill.prompt` carries no `agentId`. "unattributed" in the counts is a finding, not a bug.
 - `tasklist-persist` compares task id plus subject against the previous session's last known list. Ids can restart at 1 in a new session, so both have to match.
 - Probes are one-shot and live in memory. Re-arm after a hot reload.
+- `check-every-mode` records a call under the mode last reported by a classic hook. Until the first prompt of a session (or after a reload in the middle of a turn) that is `unknown`, and a mode switched during a turn counts from the next turn.
