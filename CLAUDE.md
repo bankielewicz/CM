@@ -36,6 +36,7 @@ Writing tests with the kit:
 - Nothing sits beneath the plugin. Hooks a test registers with `on` stand for the engine, and what they answer reaches the plugin as given.
 - Mount UI on a named surface, `surface: 'terminal'`, never an assumed one. Looping the body over `['terminal', 'desktop'] as const` shows the mod doesn't depend on one surface.
 - A reload keeps `$.state` and `$.store`, so seed what an earlier version stored and test that the new code copes with it.
+- A test can't read a file, not even `plugin.json`. It imports only code files and `claude-code`, its scope has no Node, and nothing implements `$.fs.read` beneath it.
 
 How the bar is enforced:
 
@@ -53,7 +54,7 @@ How the bar is enforced:
 - `hooks/config.ts` holds `DEFAULTS` (plan F12's Phase 1 keys) and `parseConfig`. That function holds what `register(on, options)` receives to each key's choices and range. `plugin.json`'s `userConfig` declares the same defaults, and a test checks both against F12.
 - `hooks/selfcheck.ts` is the startup self-check (F14). It keeps one record per Claude Code build in `$.store`, under `self-check/<build>`, listing which of the events in `WATCHED` have fired there, and the settings of the last session to save it. `note()` returns at once. Saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
 - `types/index.d.ts` holds the mod's own types.
-- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write, make the version lookup fail or hang, and make `session.start` itself fail. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
+- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write, make the version lookup fail, hang or give any answer, and make `session.start` itself fail. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
 
 ## Spike architecture
 

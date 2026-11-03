@@ -37,7 +37,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   **Red:** loading the mod registers `session.start`, and the self-check records the events it saw. The config defaults match F12. **Done:** coverage ≥ 95%, validate and typecheck pass, and the mod loads in a terminal with nothing visible.
 
   **Status (2026-11-03):**
-  - The mod is built: 46 tests pass, coverage is 100% of lines (95/95) and functions (43/43), and validate and the typecheck pass.
+  - The mod is built: 51 tests pass, coverage is 100% of lines (97/97) and functions (44/44), and validate and the typecheck pass.
   - A headless `claude -p --plugin-dir ./taskmaster` run loaded it and saved `self-check/2.1.317`, and no hook failed. With `maxStopBlocks: 99` and `checkpointDir: "/"` in its settings it still loaded: the original manifest refused the same settings with "hooks module did not load".
   - **Review fixes** (PR #6's review, findings 1–10 and 12–14):
     - An out-of-range setting no longer stops the mod loading: `plugin.json` declares no `min`/`max`, and `parseConfig` clamps instead.
@@ -53,6 +53,11 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - **#7, #8:** a running save loop picks up a new `session.start`'s `Io` and build, and events stored under one build no longer reach another build's record. Sessions that can't read their version still share `self-check/unknown`, on purpose.
     - **Deferred:** #6, ±Infinity becomes the default, while `CHANGELOG.md` says "moved into the range". #9, this list never names `writeToolAllowlist`, `metricsWebhook`, `frontmatterNudges`, `checkpointGit: ref` or `rca: auto`.
     - **No change:** #10, `WATCHES_EVERY_EVENT` in `selfcheck.ts` was reported as dead code, but it's an intentional compile-time guard.
+  - **Third review round** (`/code-review` of `e94578f`):
+    - An unusable version answer keeps the record under `unknown`, not a key like `self-check/undefined`.
+    - `plugin.json` and the plan no longer say metrics stay on the machine: by default they're committed with the checkpoints, so a push publishes them.
+    - **Open, for the owner:** no test can read `plugin.json`, because a kit test can't read a file. A changed default, a removed option and an added `min` or `max` are caught anyway; a removed key, an added key and a changed type aren't.
+    - **Open, for the owner:** whether a `session.end` save survives the process exiting. No session that loaded the mod has exited yet.
   - **Finding 11, moved to P1.16.** It noted that `WATCHED` leaves out `session.measure`, `classic.UserPromptSubmit` and `classic.SessionEnd`, and that nothing reads the record yet. P1.16's status will read the record. Each later task adds the events it depends on to `WATCHED`, for example `session.measure` with P1.13's context threshold.
   - **The first coverage report** (PR #6's first CI run, on `3c7a39d`). `taskmaster` isn't exempt, so the gate wrote `coverage/cobertura-coverage.xml` (12,543 bytes) and the upload step ran for the first time.
     - **The upload failed.** The log has `Coverage upload failed (HTTP 404): Not Found` as an error, and `Failed to send status report: HTTP Error 404`. The step and the `mod-coverage` job still passed, because `fail-on-error: false` turns upload errors into warnings. The workflow notes that uploads need Code Quality turned on, which would explain a 404; that's for the owner to check.
