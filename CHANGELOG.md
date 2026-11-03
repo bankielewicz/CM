@@ -13,3 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added `coverage-exempt.json` to excuse a mod from the percentage, with a reason. The Phase 0 spike is listed, at 61.58% line coverage, and its tests must still pass.
 - Added the MIT License.
 - Added a `gate-guard` check that fails a pull request changing the coverage gate's own files, and Claude Code deny rules for those files and for `gh pr merge`.
+- Added the Phase 1 task list, `docs/phase-1-tasks.md`: 28 test-first tasks in build order.
+
+### Changed
+
+- Gate A passed (GO, 2026-11-03). The plan records the result in §10.1, and the README no longer describes the check as open.

@@ -141,7 +141,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
   It may fail closed, and every deny message ends with the waive instruction. `classic.TaskCompleted` → `{ block }` is a backstop for completions that bypass `TaskUpdate`.
 - **G2: deleting a contract step's task (`TaskUpdate status=deleted`)** is denied and redirected to `taskmaster_waive`, so a step can't vanish silently.
 - **G3: Stop (`classic.Stop`)** blocks when the active `enforce` contract has steps owned by this loop that are uncovered, pending, or in progress. Its reason lists the step ids and the three ways out: do it, waive it, or `await_user`. It fails open.
-- **G4: subagent stop (`classic.SubagentStop`)** does the same, scoped to the tasks that subagent owns. It gates only agents the mod saw started through `agent.spawn`, never the engine's own helper agents, such as the compaction summarizer (§9, learned in the spike).
+- **G4: subagent stop (`classic.SubagentStop`)** does the same, scoped to the tasks that subagent owns. It gates only agents the mod saw started through `agent.spawn`, never the engine's own helper agents, such as the compaction summarizer (§9, learned in the spike). A subagent that reports through `SubagentHandback` (auto mode on 2.1.317) can't be held at SubagentStop, so G4 also denies that call while the subagent's steps are open, under the same cap (§10.1).
 - **Plan Gate:** under an `enforce` contract, write calls (`Edit`, `Write`, `NotebookEdit`, non-read-only Bash or MCP tools, read-only taken from `tool.check`) are denied until every mandatory step has a task. Read-only calls, task tools, the mod's own tools, and `AskUserQuestion` are always allowed.
 
 ### F5. Stop gate safety: loop limits and legitimate exits
@@ -533,13 +533,14 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 - **State references need literals.** `atom({ plugin, key })` must name the plugin and key as string literals, not constants.
 - **Relative `$.fs` paths follow the session's *current* working directory, and a shell `cd` moves it** (seen live: one `cd` sent a journal write to `.taskmaster/spike/.taskmaster/spike/`). `$.session.root()` is not moved by a shell `cd`, so the real mod anchors every `.taskmaster/` path to it, and so does the spike now. Under `claude plugin test`, the working directory is the plugin folder.
 - **`git commit --only` needs a prior `git add`** for new files (see F8.1).
-- **A mod's own `tool.check` hook isn't run on its own `$.tool.check` query** (observed live in the loaded spike). So the Plan Gate can't ask "is this read-only?" from inside `tool.call`. Instead it decides in the real call's `tool.check`, which runs inside `tool.call` and carries `isReadOnly`, answering `{ decision: 'deny' }` there. Real calls do carry it: on 2.1.317, read-only Bash commands (`cat`, `grep`, `ls`) arrived with `isReadOnly`, and `python3 -c` didn't. The spike's `check-every-mode` check confirms that `tool.check` fires in every permission mode, bypass included (RUNBOOK §5).
+- **A mod's own `tool.check` hook isn't run on its own `$.tool.check` query** (observed live in the loaded spike). So the Plan Gate can't ask "is this read-only?" from inside `tool.call`. Instead it decides in the real call's `tool.check`, which runs inside `tool.call` and carries `isReadOnly`, answering `{ decision: 'deny' }` there. Real calls do carry it: on 2.1.317, read-only Bash commands (`cat`, `grep`, `ls`) arrived with `isReadOnly`, and `python3 -c` didn't. The spike's `check-every-mode` check found a `tool.check` on every main-loop model call in auto (90/90), plan (59/59) and default (28/28) modes. Bypass is untested, because cloud sessions don't offer it (RUNBOOK §5). The one call without a check was refused by the engine before the permission step (`ExitPlanMode` outside plan mode), so it didn't run either.
 - **The validator lists every "gating hook without .catch"** (tool.call, Stop, compaction, ...). An observer that throws is skipped, which fails open. That suits the spike and the real mod's Stop gate; only the `TaskUpdate` gate gets a `.catch`.
 - **`session.compact` wraps a compaction** (seen live on 2.1.317). It starts before `classic.PreCompact`, and its `next()` returns after `classic.PostCompact`. In between come the summarizer's SubagentStop and then `SessionStart(compact)`, which fires *before* PostCompact. So the checkpointer writes at PreCompact (or before session.compact's `next()`), and the resume briefing can be built at `SessionStart(compact)`.
 - **The engine's own helper agents raise SubagentStop.** On 2.1.317, 30 of 32 SubagentStop events came from agents with an empty `agent_type` that no Agent call started (the compaction summarizer and small helpers that run around each prompt). G4 must gate only agents whose `agentId` it saw from `agent.spawn`. Otherwise it would block those helpers, including the compaction summarizer.
-- **A subagent's answer comes from `turn.complete`, not SubagentStop.** For a spawned agent, `last_assistant_message` is empty. After a block, the agent's next SubagentStop fires before its `turn.complete`, and that event carries the whole report as `answer`, with `agentId`. G4's question detection and any check of a subagent's answer read it there.
-- **A SubagentStop block doesn't hold a subagent** (seen live on 2.1.317, auto mode). A subagent reports by calling the `SubagentHandback` tool, so by the time SubagentStop fires its report has been delivered, and the engine ends it whatever the hook answers: there's no second stop, and `turn.complete` follows. A `tool.call` deny does work inside subagents, so the spike's `deny-handback` probe tests refusing the hand-back instead. G4's mechanism is settled from that result, and from a re-run in bypass mode, when Gate A is recorded.
-- **Classic hook payloads carry `permission_mode`** (UserPromptSubmit, Stop, SessionStart, SubagentStop). The mod reads the mode a turn's calls run in from UserPromptSubmit.
+- **A subagent's answer comes from `turn.complete`, not SubagentStop.** When a spawned agent reports through `SubagentHandback` (auto mode), its SubagentStop has an empty `last_assistant_message`. When it ends with a plain answer (plan and default modes), SubagentStop carries the text. After a block, the agent's next SubagentStop fires before its `turn.complete`, and in both cases `turn.complete` carries the whole report as `answer`, with `agentId`. G4's question detection and any check of a subagent's answer read it there.
+- **Only auto-mode subagents report through `SubagentHandback`, and a SubagentStop block can't hold those** (seen live on 2.1.317). All 5 auto-mode subagents were told to hand back and did. The plan-mode and default-mode ones (1 each) ended with a plain answer. A hand-back delivers the report before SubagentStop fires, and the engine ends the agent whatever the hook answers. There's no second stop, and `turn.complete` follows (0 of 2 held). A plain-answer subagent is held by the block (1 of 1). A `tool.call` deny on `SubagentHandback` holds a hand-back subagent (2 of 2), but the subagent acted on the deny's text only once. The other time, it retried with the same report. So G4 uses both hooks, with a cap (§10.1).
+- **Classic hook payloads carry `permission_mode`** (UserPromptSubmit, Stop, SessionStart, SubagentStop). The mod reads the mode a turn's calls run in from UserPromptSubmit. The cloud session's Accept edits mode arrives as `default`.
+- **A container restart fires `session.start` but no `classic.SessionStart`** (seen live on 2.1.317, in a cloud session). The mod started 11 times: on first loads, on container restarts that resumed the session, and on a hot reload. `classic.SessionStart` arrived only with `compact` and `clear`, never `startup` or `resume`. `/clear` starts a new session id with an empty task list, while a restart resumes the original id and its list. So F8.6's cold-start check also runs from `session.start` and must be safe to run twice. It must also find the checkpoint without relying on the session id.
 
 → **Gate A (technical go/no-go, §10.1).**
 
@@ -583,6 +584,38 @@ Write the thresholds down before the evaluation runs and don't move them during 
 | Whether the built-in task list persists across sessions | Expected not to; the checkpoint rebuilds it. Not a no-go. |
 | `SessionStart.source` after `/clear` and after auto-compaction | Adapt the resume triggers. Not a no-go. |
 | Checkpoint commit with `--only` leaves the user's staged work untouched | Fallback: `ignore` plus `ref` mode. Not a no-go. |
+
+**Result: GO** (recorded 2026-11-03, Claude Code 2.1.317, in a cloud session). All three blocking checks passed (`stop-block`, `deny-write` and `deny-complete`), and all 18 spike checks are answered. The run covered three session ids: `9ea42fa8`, plus `119c2caf` and `a9a1ddbd`, each started by a `/clear`. The full log is in `spike/taskmaster-spike/GATE-A-TASKS.md`, because `.taskmaster/spike/` isn't committed.
+
+| Check | Result | What was seen |
+| --- | --- | --- |
+| A Stop block makes Claude continue | pass | Claude continued, and the next stop had `stop_hook_active: true`. |
+| `deny` on `TaskUpdate` and write tools, main loop | pass | A denied Write didn't run, and a denied `TaskUpdate(→ completed)` left the task `in_progress`. A `classic.TaskCompleted` block also vetoed a completion. |
+| The same `deny` in subagents | pass | A subagent's denied Write didn't run, and the subagent acknowledged the deny. So the softer subagent rule above isn't needed. |
+| `$.tool.call(TaskCreate)` seeds tasks | pass | Claude's own `TaskList` showed the seeded task. |
+| Built-in task list across sessions | doesn't persist (as expected) | `/clear` starts a new session id with an empty list. A container restart resumed the original id, and its list came back. |
+| `SessionStart.source` | `compact` and `clear` | Never `startup` or `resume` across 11 mod starts. A container restart fires only `session.start` (§9). |
+| Checkpoint commit with `--only` | pass | `git add` then `commit --only` committed only `.taskmaster/`, and other staged work stayed staged (git 2.43.0). |
+| `tool.check` on every call, in every mode | auto 90/90, plan 59/59, default 28/28 | Bypass is untested, because cloud sessions don't offer it. |
+| Compaction events | pass | `session.compact` wraps PreCompact, SessionStart(compact) and PostCompact. |
+| Skills: attribution, and the plugin's `skills/` folder | pass | Attributed through the `Skill` tool and `agent.spawn`. The `taskmaster:` frontmatter block arrived intact. |
+| Journal budget | pass | p95 write 2 ms under stress, and 5 ms live. |
+
+**Fallbacks switched on:**
+- The checkpoint rebuilds the task list, as planned.
+- The Plan Gate reads `isReadOnly` from the real call's `tool.check`, because a `$.tool.check` query can't read it.
+- G4 adds a `SubagentHandback` deny, described next.
+
+**G4 settled (still Phase 2): two mechanisms, one for each way a subagent ends.**
+
+| The subagent ends with | Seen in | A SubagentStop block holds it | A `SubagentHandback` deny holds it | It did what the hook's text asked |
+| --- | --- | --- | --- | --- |
+| A plain answer | plan, default | yes (1 of 1) | n/a | yes (1 of 1) |
+| `SubagentHandback` | auto | no (0 of 2) | yes (2 of 2) | 1 of 2 |
+
+- **Plain-answer subagents:** G4 blocks `classic.SubagentStop`, as designed.
+- **Hand-back subagents:** G4 denies the `SubagentHandback` call while that subagent's steps are open. It re-checks on every attempt and lets the call through with a `released: ...` note after `maxStopBlocks`, like G3 (F5). A refusal holds the subagent but doesn't guarantee it acts on the refusal (one of the two retried with the same report). So the cap is what prevents a loop, and the deny names the open step.
+- **Open:** bypass mode. Run `check-every-mode` and both subagent probes from a terminal session in bypass mode before the Plan Gate or G4 claim to cover it.
 
 ### 10.2 Gate B: after the Phase 1.5 prototype trial (product value)
 
