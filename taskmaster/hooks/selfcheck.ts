@@ -100,9 +100,12 @@ export class SelfCheck {
       // so write nothing. The next new event tries again.
       return
     }
-    for (const event of storedEvents(stored, build)) this.seen.add(event)
+    // Merged into a copy: this.seen holds only what this session saw, so what
+    // one build's record lists can't reach another build's.
+    const events = new Set(this.seen)
+    for (const event of storedEvents(stored, build)) events.add(event)
     try {
-      const record: SelfCheckRecord = { schema: 1, build, seen: [...this.seen].sort(), config, updatedAt: await io.now() }
+      const record: SelfCheckRecord = { schema: 1, build, seen: [...events].sort(), config, updatedAt: await io.now() }
       await io.storeSet(key, record)
     } catch {
       // This write is lost; the next new event's save carries the same events.
