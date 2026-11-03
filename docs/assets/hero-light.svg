@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 280" width="760" height="280" role="img" aria-labelledby="title desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <title id="title">Taskmaster</title>
+  <desc id="desc">A planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. Planned, not installable yet.</desc>
+  <rect x="0" y="16" width="340" height="36" rx="6" fill="#ffedd5"/>
+  <text x="12" y="41" font-size="20" font-weight="600" fill="#a84300">Planned, not installable yet</text>
+  <text x="0" y="122" font-size="64" font-weight="700" fill="#1f2328" letter-spacing="-1.28">Taskmaster</text>
+  <text x="0" y="160" font-size="26" fill="#1f2328">A planned Claude Code mod</text>
+  <text x="0" y="194" font-size="26" fill="#1f2328">that holds Claude to the</text>
+  <text x="0" y="228" font-size="26" fill="#1f2328">workflow of whatever skill</text>
+  <text x="0" y="262" font-size="26" fill="#1f2328">it loads.</text>
+  <rect x="464.5" y="18.5" width="295" height="243" rx="8" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <text x="481" y="50" font-size="20" font-weight="600" fill="#59636e">Concept</text>
+  <line x1="481" x2="743" y1="64.5" y2="64.5" stroke="#d1d9e0"/>
+  <text x="481" y="96" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">S1 Reproduce</text>,<text x="743" y="96" font-size="20" fill="#0a5fc2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end">done</text>
+  <text x="481" y="132" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">S2 Fix</text>,<text x="743" y="132" font-size="20" fill="#0a5fc2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end">done</text>
+  <text x="481" y="168" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">S3 Run tests</text>,<text x="743" y="168" font-size="20" font-weight="700" fill="#a84300" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end">open</text>
+  <text x="481" y="204" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">S4 Changelog</text>,<text x="743" y="204" font-size="20" fill="#0a5fc2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end">done</text>
+  <text x="481" y="240" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">S5 Docs</text>,<text x="743" y="240" font-size="20" font-weight="700" fill="#a84300" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end">waived</text>
+</svg>

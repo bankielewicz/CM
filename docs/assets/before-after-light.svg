@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 981" width="760" height="981" role="img" aria-labelledby="title desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <title id="title">The same skill run, with and without Taskmaster (concept)</title>
+  <desc id="desc">Without Taskmaster, Claude says done and the test run and docs update were silently skipped. With it, the stop is blocked, the open steps S3 and S5 are listed, and there are three ways out: do the step, waive it with a reason, or wait for the user.</desc>
+  <rect x="0.5" y="0.5" width="759" height="321" rx="8" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <text x="24" y="49" font-size="24" font-weight="600" fill="#1f2328">Without Taskmaster</text>
+  <text x="736" y="49" font-size="20" font-weight="600" fill="#59636e" text-anchor="end">Concept</text>
+  <text x="24" y="89" font-size="20" fill="#59636e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">&gt; /fix-bug the login timeout</text>
+  <text x="24" y="119" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">● Reproduced the bug</text>
+  <text x="24" y="149" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">● Wrote the fix in session.ts</text>
+  <text x="24" y="179" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">● Updated the changelog</text>
+  <text x="24" y="209" font-size="20" font-weight="700" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">Done. The login timeout is fixed.</text>
+  <line x1="24" x2="736" y1="230.5" y2="230.5" stroke="#d1d9e0"/>
+  <text x="24" y="262" font-size="20" font-weight="600" fill="#a84300">The skill also required a test run and a docs update.</text>
+  <text x="24" y="290" font-size="20" font-weight="600" fill="#a84300">Neither happened, and nothing says so.</text>
+  <rect x="0.5" y="346.5" width="759" height="633" rx="8" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <text x="24" y="395" font-size="24" font-weight="600" fill="#1f2328">With Taskmaster</text>
+  <text x="736" y="395" font-size="20" font-weight="600" fill="#59636e" text-anchor="end">Concept</text>
+  <text x="24" y="435" font-size="20" fill="#59636e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">&gt; /fix-bug the login timeout</text>
+  <text x="24" y="465" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">● Reproduced the bug</text>
+  <text x="24" y="495" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">● Wrote the fix in session.ts</text>
+  <text x="24" y="525" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">● Updated the changelog</text>
+  <rect x="24" y="546" width="712" height="288" rx="6" fill="#dbeafe"/>
+  <text x="40" y="583" font-size="20" font-weight="700" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">Stop blocked by Taskmaster</text>
+  <text x="40" y="621" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">Open steps:</text>
+  <text x="64" y="651" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">S3 Run the test suite</text>
+  <text x="64" y="681" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">S5 Update the docs</text>
+  <text x="40" y="719" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">Three ways out:</text>
+  <text x="64" y="749" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">Do the step</text>
+  <text x="64" y="779" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">Waive it with a reason</text>
+  <text x="64" y="809" font-size="20" fill="#1f2328" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">Wait for the user</text>
+  <text x="24" y="867" font-size="20" fill="#59636e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">fix-bug · 3/5</text>
+  <line x1="24" x2="736" y1="888.5" y2="888.5" stroke="#d1d9e0"/>
+  <text x="24" y="920" font-size="20" font-weight="600" fill="#0a5fc2">Claude can be held back at most twice in a turn.</text>
+  <text x="24" y="948" font-size="20" font-weight="600" fill="#0a5fc2">After that the stop goes through, with a visible note.</text>
+</svg>

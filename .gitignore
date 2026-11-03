@@ -1,2 +1,6 @@
 # Taskmaster spike output (journals, findings) is local data
 .taskmaster/spike/
+
+# Coverage tooling
+node_modules/
+coverage/

@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(/coverage-exempt.json)",
+      "Edit(/package.json)",
+      "Edit(/package-lock.json)",
+      "Edit(/npm-shrinkwrap.json)",
+      "Edit(/.npmrc)",
+      "Edit(/.claude/settings.json)",
+      "Edit(/.claude/settings.local.json)",
+      "Edit(/scripts/**)",
+      "Edit(/.github/workflows/**)",
+      "Bash(gh pr merge *)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/coverage-stop-hook.mjs\"",
+            "timeout": 300,
+            "statusMessage": "Checking mod coverage"
+          }
+        ]
+      }
+    ]
+  }
+}
