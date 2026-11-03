@@ -378,6 +378,15 @@ test('parseConfig keeps folders inside the project, and refuses any other', () =
   expect(parseConfig({ overrideDir: '../overrides' }).overrideDir).toBe('.taskmaster/overrides')
 })
 
+test('parseConfig refuses a folder inside .git, in any case', () => {
+  for (const key of ['checkpointDir', 'metricsDir', 'overrideDir'] as const) {
+    for (const path of ['.git', '.git/checkpoints', 'state/.git', './.git/', '.GIT', 'state\\.git\\x']) {
+      expect(parseConfig({ [key]: path })[key]).toBe(DEFAULTS[key])
+    }
+    expect(parseConfig({ [key]: '.github/state' })[key]).toBe('.github/state')
+  }
+})
+
 test('parseConfig keeps experiment weights only as three numbers that are not all zero', () => {
   for (const bad of ['0/0/0', '1/2', '1/-1/1', 'a/b/c', '1/1/1/1']) {
     expect(parseConfig({ experimentWeights: bad }).experimentWeights).toBe('1/1/1')
