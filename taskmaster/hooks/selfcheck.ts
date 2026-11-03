@@ -9,6 +9,10 @@
 // meanwhile. A save whose read fails writes nothing, so a broken read can't
 // replace the history with this session's events alone. (Two sessions that
 // save in the same instant can still race; the store has no compare-and-set.)
+//
+// A record's `config` is the last saver's on this machine, not necessarily this
+// session's. A hung version lookup or store stops saves for this module
+// instance, and no event waits on either.
 
 import type { Config, Io, SelfCheckRecord, WatchedEvent } from '../types'
 
@@ -33,7 +37,11 @@ export const WATCHED = [
 // Fails the typecheck if WatchedEvent names an event WATCHED leaves out.
 export const WATCHES_EVERY_EVENT: [Exclude<WatchedEvent, (typeof WATCHED)[number]>] extends [never] ? true : never = true
 
-/** The build name the record is kept under when the engine can't say which build this is. */
+/**
+ * The build name the record is kept under when the engine can't say which build
+ * this is. Every such session shares it, so its events can come from any build
+ * that couldn't say which it was.
+ */
 export const UNKNOWN_BUILD = 'unknown'
 
 export const selfCheckKey = (build: string): string => `self-check/${build}`

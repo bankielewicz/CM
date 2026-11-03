@@ -51,9 +51,9 @@ How the bar is enforced:
 
 - `hooks/register.tsx` registers every hook. At `session.start` it builds the `Io` table (`types/index.d.ts`), the engine calls helpers get in place of `$`.
 - `hooks/config.ts` holds `DEFAULTS` (plan F12's Phase 1 keys) and `parseConfig`. That function holds what `register(on, options)` receives to each key's choices and range. `plugin.json`'s `userConfig` declares the same defaults, and a test checks both against F12.
-- `hooks/selfcheck.ts` is the startup self-check (F14). It keeps one record per Claude Code build in `$.store`, under `self-check/<build>`, listing which of the events in `WATCHED` have fired there, and the settings in force. `note()` returns at once. Saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
+- `hooks/selfcheck.ts` is the startup self-check (F14). It keeps one record per Claude Code build in `$.store`, under `self-check/<build>`, listing which of the events in `WATCHED` have fired there, and the settings of the last session to save it. `note()` returns at once. Saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
 - `types/index.d.ts` holds the mod's own types.
-- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
+- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write, make the version lookup fail or hang, and make `session.start` itself fail. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
 
 ## Spike architecture
 

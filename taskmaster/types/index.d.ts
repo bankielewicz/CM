@@ -49,7 +49,8 @@ export type WatchedEvent =
 
 /**
  * What the self-check keeps in `$.store`, one record per Claude Code build:
- * the events seen on that build, across sessions, and the settings in force.
+ * the events seen on that build, across sessions, and the settings of the last
+ * session to save it on this machine.
  */
 export type SelfCheckRecord = {
   schema: 1

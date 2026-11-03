@@ -37,7 +37,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   **Red:** loading the mod registers `session.start`, and the self-check records the events it saw. The config defaults match F12. **Done:** coverage ≥ 95%, validate and typecheck pass, and the mod loads in a terminal with nothing visible.
 
   **Status (2026-11-03):**
-  - The mod is built: 41 tests pass, coverage is 100% of lines (95/95) and functions (40/40), and validate and the typecheck pass.
+  - The mod is built: 46 tests pass, coverage is 100% of lines (95/95) and functions (43/43), and validate and the typecheck pass.
   - A headless `claude -p --plugin-dir ./taskmaster` run loaded it and saved `self-check/2.1.317`, and no hook failed. With `maxStopBlocks: 99` and `checkpointDir: "/"` in its settings it still loaded: the original manifest refused the same settings with "hooks module did not load".
   - **Review fixes** (PR #6's review, findings 1–10 and 12–14):
     - An out-of-range setting no longer stops the mod loading: `plugin.json` declares no `min`/`max`, and `parseConfig` clamps instead.
@@ -45,6 +45,14 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - The self-check never holds up an event. Its saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
     - A failing version lookup keeps the record under `unknown`.
     - Every observer's pass-through has its own test. The failing-store and choice tests were checked by mutation: each fails when the code it guards is removed.
+  - **Second review round** (`/code-review` of `6a50390`, findings 1–10):
+    - **#1:** a hung version lookup holds up no event. `session.start` no longer waits on it; each save does. A hang stops saves for that module instance.
+    - **#2:** the self-check starts even when `session.start`'s `next(e)` rejects, which the kit showed it can. The real engine is unproven (plan §9).
+    - **#3:** a folder setting inside `.git` falls back to its default.
+    - **#4, #5:** comments only. A record's `config` is the last saver's on this machine, and `plugin.json` declares no ranges.
+    - **#7, #8:** a running save loop picks up a new `session.start`'s `Io` and build, and events stored under one build no longer reach another build's record. Sessions that can't read their version still share `self-check/unknown`, on purpose.
+    - **Deferred:** #6, ±Infinity becomes the default, while `CHANGELOG.md` says "moved into the range". #9, this list never names `writeToolAllowlist`, `metricsWebhook`, `frontmatterNudges`, `checkpointGit: ref` or `rca: auto`.
+    - **No change:** #10, `WATCHES_EVERY_EVENT` in `selfcheck.ts` was reported as dead code, but it's an intentional compile-time guard.
   - **Finding 11, moved to P1.16.** It noted that `WATCHED` leaves out `session.measure`, `classic.UserPromptSubmit` and `classic.SessionEnd`, and that nothing reads the record yet. P1.16's status will read the record. Each later task adds the events it depends on to `WATCHED`, for example `session.measure` with P1.13's context threshold.
   - **The first coverage report** (PR #6's first CI run, on `3c7a39d`). `taskmaster` isn't exempt, so the gate wrote `coverage/cobertura-coverage.xml` (12,543 bytes) and the upload step ran for the first time.
     - **The upload failed.** The log has `Coverage upload failed (HTTP 404): Not Found` as an error, and `Failed to send status report: HTTP Error 404`. The step and the `mod-coverage` job still passed, because `fail-on-error: false` turns upload errors into warnings. The workflow notes that uploads need Code Quality turned on, which would explain a 404; that's for the owner to check.
@@ -144,7 +152,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   *Depends on P1.12. DoD 6.*
 
 ## M5. Control and visibility (F9, F11)
-- [ ] P1.16 **`/taskmaster` command** (F9). Status (including the self-check record for this build: which watched events fired, from P1.0), `off | advisory | enforce | strict`, `waive <step> <reason>`, `contract show <skill>`, `checkpoint`, `runs`, `resume [run]`, `abandon [run]`, `report` and `exempt <skill>`. **Red:** a test of each subcommand's effect on state. *Depends on P1.11 and P1.15.*
+- [ ] P1.16 **`/taskmaster` command** (F9). Status (including which watched events fired on this build, read from P1.0's self-check record, and the settings, read from the live config because the record holds the last saver's), `off | advisory | enforce | strict`, `waive <step> <reason>`, `contract show <skill>`, `checkpoint`, `runs`, `resume [run]`, `abandon [run]`, `report` and `exempt <skill>`. **Red:** a test of each subcommand's effect on state. *Depends on P1.11 and P1.15.*
 - [ ] P1.17 **Status line, band, toasts, and the summary below the answer** (F11).
   - **Status line:** `skill · 3/7 · 1 waived`.
   - **Toasts:** shown on blocks.

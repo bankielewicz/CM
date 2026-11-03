@@ -46,7 +46,7 @@ export const CHOICES: Partial<Record<Key, readonly string[]>> = {
   rca: ['manual', 'off'],
 }
 
-/** Each number key's range, as plugin.json's `min` and `max` give it. */
+/** Each number key's range. plugin.json declares none: see the top of this file. */
 const RANGES: Partial<Record<Key, readonly [number, number]>> = {
   maxStopBlocks: [1, 5],
   checkpointEveryWrites: [1, 1000],
