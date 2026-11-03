@@ -214,6 +214,16 @@ test('a failing version lookup still runs the self-check, under the build "unkno
   expect(record.build).toBe('unknown')
 })
 
+test('a save in flight when session.start fires again saves next under the new build', { timeoutMs: 3_000 }, async ($, on) => {
+  const world = engine(on, { holdFirstWrite: true, failVersions: 1 })
+  await start($)
+  await start($)
+  world.release()
+
+  await untilSaved(world, () => world.writes.length >= 2)
+  expect(world.writes).toEqual(['self-check/unknown', SELF_CHECK_KEY])
+})
+
 // ------------------------------------------------------- observe only
 
 test('every watched event passes through unchanged, with the engine\'s own answer', async ($, on) => {
