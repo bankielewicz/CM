@@ -4,7 +4,8 @@ This is the durable copy of the Gate A close-out task list. Claude's built-in ta
 
 **After `/clear` (step 2.6), start here.** `/clear` also wipes Claude's conversation, so send: `Read spike/taskmaster-spike/GATE-A-TASKS.md and carry on from the first open item.` Then Claude:
 1. Reads `/tm-spike status` (you run it and paste the output) and records the `tasklist-persist` result under 2.6.
-2. Checks the header. If it reads `/18 checks`, `/clear` loaded the new code (2.3b is done): run 2.3c in auto mode now, then go on to 3.1. If it still reads `/17`, 2.3b and 2.3c move into the bypass session (3.1), which starts fresh and loads the new code.
+2. Checks the header. If it reads `/18 checks`, `/clear` loaded the new code (2.3b is done): run 2.3c in auto mode now, then go on to 3.1. If it still reads `/17`, the new code loads only when this session restarts (as it did after the earlier container restart). Until then, 2.3c can't run, so go on with 3.1 and run 2.3c whenever `/18` shows up.
+3. Runs 3.1 in **this** session by switching its permission mode to bypass. Don't start a new session for it: a new cloud session gets a fresh container, which has neither this session's mods folder nor `.taskmaster/spike/findings.json` (gitignored), so the spike wouldn't load and every result so far would be missing.
 
 **Decisions taken**
 - The list is kept in two places: built-in tasks and this file.
