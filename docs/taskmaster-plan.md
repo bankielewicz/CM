@@ -1,288 +1,320 @@
 # Taskmaster: a universal adherence guardrail mod for Claude Code
 
-Status: design plan (no code yet) · Target: Claude Code function-hooks mod API (early access, build 2.1.317 checked)
+Status: design plan, revised after advisor review (no code yet) · Target: Claude Code function-hooks mod API (early access; checked against build 2.1.317's `claude-code.d.ts`)
 
 ## 1. Short answer
 
-**Yes, with one correction.** A forced task list on its own does not make Claude "work harder." It produces *checklist theater*: tasks get created to satisfy the gate and then marked done without the work. What works is a task list that is:
+**Yes, but only if the goal is reframed.** A forced task list on its own does not make Claude "work harder." It produces *artifacts*. When Claude writes its own plan, it plans what it was going to do anyway and then ticks every box: checklist theater, or Goodhart's law. "Bull in a china shop" failures come in four kinds:
 
-1. **derived from the skill**, so the tasks are the skill's own steps and not ones Claude made up,
-2. **gated by deterministic hooks on things the engine can see** (tool calls, task status changes, the attempt to stop), and
-3. **checked against evidence the mod recorded itself** (which tools ran and which files changed while each task was in progress), not against what Claude says it did.
+| Failure | Can a task-master mod fix it? |
+| --- | --- |
+| (a) skips steps the skill requires | **Yes**: contract steps plus a Stop gate |
+| (b) claims "done" without doing or checking the work | **Yes**: the completion gate checks the mod's own record |
+| (c) does work nobody asked for | Partly: drift warnings |
+| (d) breaks the skill's constraints (MUST/NEVER) | Mostly no: prose rules can't be checked deterministically, so they're surfaced and audited, not enforced |
 
-Claude's failures are mostly premature stopping, skipped steps, and drifting off the workflow, not "laziness" in a human sense. The mod can't make Claude reason better. It *can* make skipping a step visible, costly, and hard to hide, and that is the realistic goal.
+The task list improves (a) and (b) only when four things hold:
+1. **The plan comes from the skill, not from the model doing the work.** It comes from the skill's frontmatter or a separate extraction call, and the mod seeds the tasks itself.
+2. **Evidence is what the mod saw, not what Claude says.** The mod's own `tool.call` ledger records commands, errors, edits, and order, and prose can't fake it. Task `metadata` is Claude's claim, not evidence.
+3. **Gates sit where Claude commits:** marking a task `completed`, and stopping.
+4. **Skipping is allowed, but only out loud.** A waive tool records each skip with a reason, and every skip is shown to the user.
+
+**What the mod promises:** *Claude never silently skips a declared step, never claims completion without matching evidence, and never loses its place across compaction or a new session.* That can be delivered. "Works harder" can't be promised, because no hook raises reasoning quality.
 
 ## 2. What the mod API actually gives us (verified in the type declarations)
 
 | Need | Mechanism | Hard / soft |
 | --- | --- | --- |
-| Know a skill was loaded, read its full text, frontmatter, path, plugin | `skill.prompt` event (fires for `/name`, the Skill tool, and skills preloaded into subagents) | Hard |
-| Add the contract to the skill text Claude reads | `skill.prompt` rewrite of `text` (before the row is sent, so the prompt cache stays intact) | Hard (delivery), soft (compliance) |
-| Block a tool call / rewrite its input | `tool.call` → `{ deny }` | Hard |
-| Know if a call is a read or a write | `tool.check` input `isReadOnly` (engine's own classification; absent = treat as write) | Hard |
-| See task creation / status changes | `tool.call` on `TaskCreate`, `TaskUpdate`, `TaskList`, legacy `TodoWrite`; `classic.TaskCreated`, `classic.TaskCompleted` | Hard |
-| Veto marking a task complete | `tool.call` deny on `TaskUpdate{status:'completed'}`; `classic.TaskCompleted` → `{ block }` as backstop | Hard |
-| Stop Claude from ending the turn early | `classic.Stop` / `classic.SubagentStop` → `{ block: reason }` (Claude continues with the reason) | Hard |
+| Know a skill was loaded: full text, frontmatter, path, plugin | `skill.prompt` (fires for `/name`, the Skill tool, and skills preloaded into a subagent). **It carries no `agentId`**, so the loop is taken from the `Skill` tool's `tool.call` (which has one), from `agent.spawn` for preloaded skills, and a typed `/name` means the main loop | Hard |
+| Add the contract to what Claude reads | rewrite `text` in `skill.prompt`. This happens before the row is sent, so the prompt cache stays intact | Hard (delivery) |
+| Seed the task list from the contract | `$.tool.call({ tool: 'TaskCreate', ... })` | Hard (needs a spike to confirm Claude sees the seeded tasks) |
+| Block or rewrite a tool call | `tool.call` → `{ deny }` | Hard |
+| Tell reads from writes | `tool.check` input `isReadOnly` (the engine's classification; absent means treat it as a write) | Hard |
+| Observe tasks | `tool.call` on `TaskCreate` / `TaskUpdate` / `TodoWrite`. **`TaskGet` and `TaskList` don't return `metadata`, and `TaskList` omits `description`**, so the mod keeps its own ledger | Hard |
+| Veto a completion | `tool.call` deny on `TaskUpdate{status:'completed'}` (primary); `classic.TaskCompleted` → `{ block }` as a backstop (it reads only `block` / `preventContinuation` / `stopReason`) | Hard |
+| Stop Claude from quitting early | `classic.Stop` / `classic.SubagentStop` → `{ block: reason }`; Stop also takes `additionalContext`. The input includes `stop_hook_active`, `last_assistant_message`, `background_tasks`, `session_crons` | Hard |
+| Ask the user | `$.ui.ask` (the AskUserQuestion dialog) | Hard |
+| Tools Claude calls | `$.tool.register` (`waive`, `await_user`, `checkpoint`), served by a `tool.call` hook | Hard (validation) |
 | Inject a reminder without breaking the cache | `$.session.append({ message: { type: 'user', ... } })` | Hard (delivery) |
-| Survive context compaction | `classic.PreCompact` (checkpoint before), `session.compact` → rewrite `instructions`, `classic.PostCompact` (gives `compact_summary`) → re-append contract | Hard |
-| Get ahead of auto-compaction | `session.measure` → `context.percent` | Hard (trigger), soft (narrative quality) |
-| Brief a brand-new session | `classic.SessionStart` (`source`: `startup` / `resume` / `clear` / `compact` / `fork`) → `additionalContext`; `session.start` | Hard (delivery) |
-| Durable checkpoint files | `$.fs.read` / `write` / `list` / `exists` / `stat` (whole-file writes, no append), `$.process.run` for `git` anchors | Hard |
-| A tool Claude calls to save its narrative | `$.tool.register` (`mcp__taskmaster__checkpoint`, `isDeferred: false`) | Hard (validation), soft (content) |
-| Independent judgment | `$.model.classify` (cheap label), `$.model.complete`, `$.model.fork` (question over the transcript, served from the prompt cache), `$.agent.spawn` (read-only auditor subagent) | Soft |
-| Session / cross-session memory | `$.state` (survives hot reload), `$.store` (across sessions), `$.fs` (log files) | Hard |
-| UI | `$.ui.open` Pane, `AbovePrompt` band, `$.ui.status`, `$.ui.toast`, `$.command.register` | Hard |
+| Survive compaction | `classic.PreCompact` (checkpoint before), `session.compact` (rewrite `instructions`), `classic.PostCompact` (provides `compact_summary`), `classic.SessionStart{source:'compact'}` → `additionalContext` | Hard |
+| Get ahead of auto-compaction | `session.measure` → `context.percent` | Hard (trigger) |
+| Brief a brand-new session | `classic.SessionStart` (`source`: `startup`, `resume`, `clear`, `compact` or `fork`) → `additionalContext` | Hard (delivery) |
+| Durable files | `$.fs.read` / `write` / `list` / `exists` / `stat` (whole-file writes; there is no append), `$.process.run` for `git` | Hard |
+| Independent judgment | `$.model.complete` (Haiku, `timeoutMs`); `$.model.classify` (cheap label); `$.agent.spawn` (a background subagent whose answer arrives as `turn.complete`; **refused past a Stop**) | Soft |
+| Memory | `$.state` (session; survives hot reload), `$.store` (across sessions, per machine) | Hard |
+| UI | Pane, `AbovePrompt` band, `$.ui.status`, `$.ui.toast`, `$.command.register`, text below the final answer via `turn.complete` | Hard |
+| Interrupts | `turn.complete` has `isAborted` and `agentId`; `turn.start` without `agentId` is a new main-loop prompt | Hard |
 
-**Not available or not reliable:** changing the system prompt mid-thread (busts the cache and loses thinking; avoid), knowing *semantically* whether code is correct, and stopping a determined model from writing fake evidence text. The mitigation for that last one is cross-checking evidence against the mod's own ledger.
+**Time budget:** each hook gets 10 s of its *own* time, and the clock stops while a `$` call or `next(e)` is in flight. A `.catch` handler gets 1 s. An LLM call inside `classic.Stop` is therefore allowed; the cost is latency, so bound it with `timeoutMs`.
+
+**Not available, or a poor fit:**
+- Rewriting the system prompt mid-thread. It busts the cache and loses thinking.
+- Using `$.model.fork` as an auditor. It replays the main thread's last request (so it lacks the final answer), every tool is denied, it covers the main thread only, and it's the same model grading its own story.
+- Semantic checks of correctness.
+- Stopping a determined model from gaming the gates.
 
 ## 3. Design principles
 
-1. **Universal by default, stricter by opt-in.** Works with any skill and no configuration. A skill author *may* add a `taskmaster:` frontmatter block for exact steps and evidence; the mod never requires one.
-2. **Deterministic first, LLM second.** Every hard gate runs on facts the hooks observed. LLM judgment is used only for (a) extracting steps from prose, cached once per skill version, and (b) an optional audit at checkpoints. It is never the only thing standing between Claude and a block.
-3. **Every block tells Claude exactly what to do next.** A deny message names the missing step, task, or evidence. No vague "follow the skill."
-4. **Every gate has a loop breaker and a human override.** No gate can trap a session. Overrides are logged.
-5. **Proportional.** Purely informational skills (references, style guides) get observe-only treatment and no gates.
-6. **Fail closed for guards, fail open for helpers.** Gates use `.catch` to deny on internal error (with an override path). The UI, logging, and auditor fail open.
+1. **Universal by default, stricter by opt-in.** Any skill or command works with no configuration. Precedence: skill frontmatter, then the user's per-skill override, then LLM extraction, then heuristics.
+2. **Deterministic gates, soft judgment.** Hard gates check only facts the mod observed. LLM judgment extracts contracts (cached) and gives an advisory audit at Stop; it never blocks on its own except as noted in F7.
+3. **Every block says exactly what to do next, including how to waive.**
+4. **No gate can trap a session.** Every gate has loop limits and overrides, and the user's Esc freezes all gates.
+5. **Fail open for nags, fail closed only where safe.** The Stop gate fails open, because a bug that fails closed traps the user. Only the `TaskUpdate` gate may fail closed, and its deny message must show how to waive.
+6. **Proportional.** Reference skills get no contract. A contract with low extraction confidence is advisory only.
+7. **The context window is not storage.** The mod writes checkpoints to disk on observed events and never relies on Claude to remember.
 
 ## 4. Architecture
 
 ```
-skill.prompt ──► Contract Compiler ──► Contract (steps, rules, evidence reqs, strictness)
-                       │                         │
-                       ▼                         ▼
-              text rewrite: append       $.state: active contracts (stack)
-              "Taskmaster contract"              │
-                                                 ▼
-TaskCreate/TaskUpdate/TodoWrite ──► Task Ledger ◄── tool.call observer (every call, per agentId)
-                                         │
-     ┌───────────────┬───────────────────┼─────────────────┬──────────────────┐
-     ▼               ▼                   ▼                 ▼                  ▼
- Plan Gate      Completion Gate      Stop Gate        Drift Monitor     Checkpointer
- (tool.call)    (TaskUpdate /        (classic.Stop,   (tool.call)       (task transitions, PreCompact,
-                 TaskCompleted)       SubagentStop,                      Stop, session.end, context %)
-                                      freshness)                               │
-                                         │                                     ▼
-                                         ▼                       .taskmaster/runs/<id>/ on disk
-                                 Auditor (optional, budgeted)    checkpoint.json · HANDOFF.md · journal
-                                         │                                     │
-                                         ▼                                     ▼
-                       Pane / band / status · /taskmaster commands   Resumer (SessionStart: compact /
-                                                                     startup / clear → briefing + gates)
+skill.prompt ─► Contract Compiler ─► Contract {steps, verify specs, rules, kind, confidence}
+ + Skill tool.call (agentId)  │                  │
+                              ▼                  ▼
+                 protocol footer appended    $.state contract stack ──► seed tasks ($.tool.call TaskCreate)
+                                                 │
+every tool.call ─────────────────────────► Ledger (per agentId: tool, input digest, isError, files, seq)
+TaskCreate/TaskUpdate/TodoWrite results ──►   │   + task → step map, task owner
+                                                 │
+   ┌────────────┬──────────────┬─────────────────┼──────────────┬───────────────────────┐
+   ▼            ▼              ▼                 ▼              ▼                       ▼
+ G1 Complete  G2 Delete     G3 Stop /        Plan Gate      Drift Monitor          Checkpointer
+ (TaskUpdate  →waive        G4 SubagentStop  (writes before (writes w/o task)      (transitions, PreCompact,
+  completed)                (fail-open)       plan)                                  Stop, end, context %)
+                               │                                                        │
+                               ▼                                                        ▼
+                      Advisory audit (Haiku, after the gates pass)        .taskmaster/runs/<id>/
+                               │                                           checkpoint.json · HANDOFF.md · journal
+                               ▼                                                        │
+            status line · band · Pane · summary below the answer         Resumer (SessionStart compact/startup/clear)
 ```
 
 ## 5. Features and functionality (the build list)
 
 ### F1. Contract Compiler: skill → contract (universal)
-- **F1.1 Capture.** Hook `skill.prompt` and record `skill`, `text`, `frontmatter`, `source`, `pluginName`, `path`, and a content hash.
-- **F1.2 Classify the skill** as `workflow` (has an ordered procedure) or `reference` (knowledge only). Order of precedence: frontmatter `taskmaster.mode`, then heuristics (numbered or ordered lists, "Step N" headings, checklists, imperative verbs, MUST/NEVER/ALWAYS), then `$.model.classify` when the heuristics can't decide. `reference` skills are observe-only.
-- **F1.3 Extract steps** into `{ id, title, required: bool, evidence: [kinds], order }`.
-  - Tier A: the explicit frontmatter `taskmaster.steps`. Exact, author-controlled.
-  - Tier B: deterministic markdown parse (ordered lists, `## Step`, `- [ ]` checklists).
-  - Tier C: a `$.model.complete` extraction prompt with JSON output, validated against a schema.
-  - Cache the result in `$.store` keyed by `skill + hash`, so each skill version is extracted once.
-- **F1.4 Extract rules.** Collect MUST/NEVER/ALWAYS sentences into a rule list. Rules are surfaced to Claude and shown to the auditor; they are not hard-enforced, because arbitrary prose rules can't be checked deterministically.
-- **F1.5 Inject the contract.** Rewrite the skill `text` to append a short, fixed "Taskmaster contract" block: the extracted steps with ids, plus the protocol (create one task per step with `metadata.step = <id>`, one `in_progress` at a time, close each task with evidence, waive a step only by asking the user). The block is appended to the skill's own text, never replacing it, so the skill's workflow stays primary.
-- **F1.6 Optional frontmatter schema** that skill authors can opt into:
+- **F1.1 Capture** `skill`, `text`, `frontmatter`, `source`, `pluginName`, `path`, and a content hash. Attribute the skill to a loop: the `Skill` tool's `tool.call.agentId`, `agent.spawn` for preloaded skills, or the main loop for a typed `/name`.
+- **F1.2 Deterministic parse (no LLM):** name, description, and frontmatter (`allowed-tools`, `context: fork`, `disable-model-invocation`); numbered or ordered lists, "Step N" headings, `- [ ]` checklists; MUST/NEVER/ALWAYS lines; shell commands in code fences that look like test, lint, or build (these become candidate `verify` commands).
+- **F1.3 One cheap model call (Haiku, cached):** classify the skill as `workflow`, `reference`, or `persona`; produce step ids and titles, required versus optional, user-confirmation points, candidate verify commands, and a **confidence** score. The output is JSON, validated against a schema, and cached in `$.store` by `path + hash`, so each skill version is extracted once. If the call fails, use the F1.2 result.
+- **F1.4 Enforcement level of the contract:**
+  - `enforce`: the skill's own frontmatter, the user's per-skill override, or high LLM confidence where the deterministic parse agrees on the steps,
+  - `advisory`: anything else (Claude is reminded, gates warn instead of deny),
+  - `none`: `reference` and `persona` skills, and anything in `exemptSkills`.
+- **F1.5 Protocol footer**, about 10 lines appended to the skill text: the step ids (namespaced `skill:S#`), "tag each task `[S#]`", "one task in progress at a time", "call `taskmaster_waive` to skip a step, with a reason", "call `taskmaster_await_user` when you need the user's input", and "call `taskmaster_checkpoint` at milestones". The skill's own text stays primary and is never replaced.
+- **F1.6 Seed the tasks** from the contract with `$.tool.call(TaskCreate)`, once the spike confirms Claude sees them. Otherwise the footer tells Claude to create them, and the Plan Gate enforces it.
+- **F1.7 Opt-in frontmatter** for skill authors (optional; never required):
   ```yaml
   taskmaster:
-    mode: workflow | reference | off
-    strictness: observe | guide | enforce | strict
+    mode: enforce            # off | advisory | enforce
     steps:
       - id: tests
         title: Run the test suite
-        evidence: [command]      # command | file_change | tool:<name> | note
-        required: true
-    stop_requires: all_required  # all_required | none
+        mandatory: true
+        verify: { bash: "npm test", exit: 0 }   # or { edits: "src/**" } / { tool: "<name>" }
+    confirm_before: [deploy]  # steps that need the user's OK first
   ```
+- **F1.8 Per-skill user override (for third-party skills):** the first time a skill runs, the Pane shows the extracted contract. `/taskmaster contract edit <skill>` lets the user fix it and saves it to `$.store`. That contract is then `enforce` for that skill version.
 
-### F2. Task Ledger: the single source of truth
-- **F2.1** Observe `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`, and legacy `TodoWrite`, per `agentId`. Store each task's id, subject, status history, `metadata.step`, owner, and timestamps in `$.state`.
-- **F2.2 Work attribution.** Every `tool.call` made while a task is `in_progress` is recorded against that task: tool, `tool_use_id`, read or write, files touched, the Bash command and whether it errored.
-- **F2.3 Coverage map.** Contract step id → task(s) → status. A step is *covered* once a task references it, and *satisfied* once that task completed with valid evidence.
-- **F2.4 Persistence.** The ledger lives in `$.state` and is written to the on-disk checkpoint (F8), so it never depends on the context window.
+### F2. Ledger: the mod's own record (source of truth)
+- **F2.1** For each `tool.call` on any loop: `agentId`, tool, a trimmed input digest, `isError`, a sequence number, files touched, and the Bash command line.
+- **F2.2 Task map** built from `TaskCreate` / `TaskUpdate` / `TodoWrite` *results*: task id → `[S#]` step, status history, owner (the loop that created it), and the ledger sequence numbers between `in_progress` and `completed`.
+- **F2.3 Coverage map:** step → task(s) → state (`uncovered`, `pending`, `in progress`, `satisfied`, `waived`, `needs re-verify`).
+- **F2.4** Stored in `$.state` and written to disk checkpoints (F8). Never rebuilt from `TaskList`, which lacks metadata.
 
-### F3. Plan Gate: no plan, no writes
-- **F3.1** While a `workflow` contract is active at `enforce` or above, deny write calls (`Edit`, `Write`, `NotebookEdit`, non-read-only `Bash`, non-read-only MCP tools) until every required step is covered by a task.
-- **F3.2** Read-only calls are always allowed, so Claude can explore before planning. Classification comes from `tool.check`'s `isReadOnly`; a missing value counts as a write.
-- **F3.3** The deny message lists the uncovered step ids and the exact `TaskCreate` shape to use.
-- **F3.4** Exempt the mod's own tools, task tools, `AskUserQuestion`, and anything in a user-configured allowlist.
+### F3. Tools the mod gives Claude (`$.tool.register`, `isDeferred: false`)
+- **`taskmaster_waive { step, reason }`** marks a step waived. It's logged, shown in the status line and the final summary, and at `strict` it needs the user's yes through `$.ui.ask`.
+- **`taskmaster_await_user { question }`** records a legitimate wait, so the Stop gate won't fire while Claude is waiting on the user.
+- **`taskmaster_checkpoint { summary, decisions[], open_questions[], next_action, current_step }`** saves the narrative checkpoint (F8.4).
 
-### F4. Completion Gate: no evidence, no "done"
-- **F4.1** Intercept `TaskUpdate{status:'completed'}`. Require `metadata.evidence` (a short summary plus references).
-- **F4.2 Deterministic cross-check against the ledger:**
-  - the task saw at least one non-trivial tool call while `in_progress`; otherwise "completed with no recorded work",
-  - every evidence kind the step requires was actually observed: `command` means a Bash call ran while the task was in progress (and for test-like steps, did not error), `file_change` means an `Edit`/`Write` happened, and `tool:<name>` means that tool ran,
-  - any file paths cited as evidence appear in the ledger.
-- **F4.3** Backstop via `classic.TaskCompleted` → `{ block }` for completions that route around `TaskUpdate` (teammates, subagents).
-- **F4.4** Deny messages say exactly what's missing ("step `tests` requires a command run; none was recorded while task #4 was in progress").
+### F4. Hard gates (deterministic)
+- **G1: completing a task (`TaskUpdate status=completed`)** is denied when:
+  - no work was recorded between `in_progress` and `completed` ("completed with no recorded work"),
+  - a `verify` spec isn't met: there's no matching command *after the last edit*, or its exit was non-zero (matched on both command and error flag, so `echo PASS` doesn't count),
+  - a burst of completions arrives with no work between them.
 
-### F5. Stop Gate: no quitting with open work
-- **F5.1** On `classic.Stop`, if an active `workflow` contract has required steps that are uncovered, pending, or in progress, return `{ block }` naming them.
-- **F5.2 Loop breaker (mandatory):**
-  - at most N blocks per user turn (default 2),
-  - no-progress detection: if the ledger hasn't changed since the last block, allow the stop and flag the contract `abandoned`,
-  - honor `stop_hook_active`, user interrupts (`turn.complete` with `reason: 'aborted'`), and `background_tasks` (paused, not done).
-- **F5.3 Legitimate exits:** a step is waived by the user (F9), or Claude asks the user a question with `AskUserQuestion` (waiting on a human is not quitting).
-- **F5.4** The same logic on `classic.SubagentStop` for subagents that own tasks.
+  It may fail closed, and every deny message ends with the waive instruction. `classic.TaskCompleted` → `{ block }` is a backstop for completions that bypass `TaskUpdate`.
+- **G2: deleting a contract step's task (`TaskUpdate status=deleted`)** is denied and redirected to `taskmaster_waive`, so a step can't vanish silently.
+- **G3: Stop (`classic.Stop`)** blocks when the active `enforce` contract has steps owned by this loop that are uncovered, pending, or in progress. Its reason lists the step ids and the three ways out: do it, waive it, or `await_user`. It fails open.
+- **G4: subagent stop (`classic.SubagentStop`)** does the same, scoped to the tasks that subagent owns.
+- **Plan Gate:** under an `enforce` contract, write calls (`Edit`, `Write`, `NotebookEdit`, non-read-only Bash or MCP tools, read-only taken from `tool.check`) are denied until every mandatory step has a task. Read-only calls, task tools, the mod's own tools, and `AskUserQuestion` are always allowed.
 
-### F6. Drift Monitor: stay on the workflow
-- **F6.1** Write calls made while no task is `in_progress`: warn at `guide`, deny at `strict`.
-- **F6.2** More than one task `in_progress`: warn.
-- **F6.3** Steps done out of the contract's order, when the skill declares an order: warn, never block. Order in prose is often advisory.
-- **F6.4** Warnings go to Claude as a hidden user row (`$.session.append`), batched at most once per turn to avoid noise.
+### F5. Stop gate safety: loop limits and legitimate exits
+- At most **2 blocks per contract per user turn**. Block again only if the ledger has moved since the last block. Otherwise let the stop through and append below the answer: `released: S3, S5 unverified`.
+- **Never block** when `background_tasks` or `session_crons` aren't empty, when `stop_hook_active` would re-enter, or when the turn was interrupted (`isAborted`).
+- **Legitimate waits** (the biggest false-positive risk): don't block if `await_user` was called this turn, or if the last message is asking the user something. A trailing "?" is the fast pre-check, and `$.model.classify` the fallback.
+- **User redirect:** a new main-loop prompt (`turn.start` without `agentId`) suspends Stop-blocking for the previous contract and appends a one-line note asking Claude to continue that contract or abandon it.
 
-### F7. Auditor: optional, budgeted, soft judgment
-- **F7.1 Modes:** `off` · `final` (once, when all steps are satisfied and Claude tries to stop) · `critical` (steps marked critical) · `sampled`.
-- **F7.2 Mechanism:** `$.model.fork` asks one question over the transcript, served from the prompt cache, so it's cheap. For heavy audits, `$.agent.spawn` runs a registered read-only auditor subagent. The input is the contract, rules, ledger, and evidence; the output is `PASS` or `FAIL` plus specific findings (JSON).
-- **F7.3** `FAIL` → one Stop block carrying the findings. After that, the result is reported to the user and never blocks again (the auditor gets one bite).
-- **F7.4 Budgets:** maximum audits per session, maximum tokens; cost is tracked from `usage` and shown in the pane.
+### F6. Drift Monitor (soft)
+- Write calls with no task in progress: warn under `enforce`, deny under `strict`.
+- More than one task in progress: warn.
+- Steps done out of declared order: warn only, because order in prose is often advisory.
+- At most one batched note per turn, through `$.session.append`.
+
+### F7. Advisory audit (soft, budgeted)
+- **When:** at Stop, only after G3 passes, and only while a contract is active.
+- **How:** `$.model.complete` with Haiku and `timeoutMs` ≈ 8 s, over **curated evidence of 2–5k tokens**: the contract, a ledger summary, waivers, and `last_assistant_message`. It never sees the full transcript, and no model is called per tool call.
+- **Question:** "Which claims in the final message, and which steps, have no supporting evidence in the ledger?" Output is JSON findings with confidence.
+- **Phase 2:** advisory only, with findings appended below the answer. **Phase 3:** may block **once** per Stop cycle, only on specific, high-confidence findings.
+- **Phase 3 verifier:** for semantic `verify` specs, spawn a read-only verifier subagent *when a task is completed*, not at Stop, because spawning is refused past a Stop.
 
 ### F8. Checkpoints that survive compaction and a cold start (MVP-critical)
 
-The rule: **the context window is not storage.** Anything the next session needs must already be on disk before it's needed, so the mod writes checkpoints itself, on events it observes. It never depends on Claude remembering to save. Claude supplies only what the mod can't know (intent, decisions, next action), and gates enforce that too.
-
-**F8.1 Checkpoint store (on disk, in the project):**
+**F8.1 On-disk store** (in the working tree, where a new session, machine, or container will look):
 ```
 .taskmaster/
-  active.json                 # pointer: open run ids, owning session, lock heartbeat
+  active.json                 # open run ids, owning session, lock heartbeat
   runs/<run-id>/
-    checkpoint.json           # machine state (schema-versioned, see F8.2)
-    HANDOFF.md                # narrative briefing a cold session reads first
-    journal.jsonl             # event log (gates, transitions, tool calls)
+    checkpoint.json           # machine state (schema-versioned)
+    HANDOFF.md                # narrative briefing for a cold session
+    journal-<n>.jsonl         # event log, rolled into chunks (no append in $.fs)
 ```
-- Lives in the working tree because that is what a new session, a new machine, or a new cloud container sees. `$.store` (per user, per machine) holds only a mirror and an index.
-- `$.fs` has `read`/`write`/`list`/`exists`/`stat` but no append or rename, so each file is rewritten whole, and the journal rolls over into numbered chunks.
-- Secret redaction (known key and token patterns) runs before every write, because commands and paths can hold credentials.
-- `checkpointGit` option: `ignore` (default: add `.taskmaster/` to `.git/info/exclude`) or `commit`. **In ephemeral environments, such as a Claude Code cloud container, only committed and pushed checkpoints survive**, so this must be `commit` there. The mod never pushes on its own; the push stays the user's or the skill's call.
+- `$.store` holds only a mirror and an index (it's per user and per machine).
+- Secrets are redacted before every write.
+- `checkpointGit`: `ignore` (default; the mod adds `.taskmaster/` to `.git/info/exclude`) or `commit`. **In ephemeral containers (cloud sessions), only committed and pushed checkpoints survive, so use `commit` there.** The mod never pushes by itself.
 
-**F8.2 What a checkpoint holds**, enough to resume with zero transcript:
-- the run id, schema version, the session ids that touched it, and timestamps,
-- **the goal**: the user's original request text (captured at `prompt.submit`/`turn.start`) and any later redirects,
-- **the skill**: name, `path`, `pluginName`, content hash, *and the full extracted contract embedded* (steps, rules, evidence requirements), so the run can be resumed even if the skill file changed or is missing,
-- **the ledger**: every task with its step id, status history, evidence, and handoff note; waivers; strictness,
-- **the work trail**: files written (with a content hash at write time), commands run (with error flag), and the last gate events,
-- **a workspace anchor**: git branch, `HEAD`, and a hash of the dirty-file list (via `$.process.run git ...`), used for staleness checks on resume,
-- **the narrative**: summary so far, decisions made and why, open questions, and the next action (from F8.4).
+**F8.2 Contents**, enough to resume with no transcript:
+- the run id, schema version, the sessions involved, and timestamps,
+- **the goal**: the user's original request (from `prompt.submit` / `turn.start`) and any redirects,
+- **the skill**: name, path, plugin, hash, and **the full contract embedded**, so a run can resume even if the skill file changed or is missing,
+- **the ledger and coverage map**: tasks, steps, statuses, waivers, verify results,
+- **the work trail**: files written (with a content hash at write time) and commands run (with error flag),
+- **a workspace anchor**: git branch, `HEAD`, and a hash of the dirty-file list,
+- **the narrative**: summary, decisions and their reasons, open questions, next action.
 
-**F8.3 When the mod checkpoints** (deterministic, throttled to at most one write per few seconds):
-1. after every task transition (create, `in_progress`, `completed`, `deleted`), once `next(e)` resolves,
-2. every N write calls (default 10) while a run is active,
-3. at `classic.PreCompact` (manual or auto), before history is summarized,
-4. at every `classic.Stop`, whether or not it's blocked, keeping `last_assistant_message`,
-5. at `session.end` (exit, `/clear`, logout): the run is marked `paused` unless every required step is satisfied,
-6. when context fill crosses the threshold (`session.measure` → `context.percent`, default 70%; see F8.5).
+**F8.3 When the mod writes** (deterministic, throttled):
+1. after every task transition,
+2. every N write calls (default 10),
+3. at `classic.PreCompact`,
+4. at every `classic.Stop` (with `last_assistant_message`),
+5. at `session.end`: the run is marked `paused` unless every mandatory step is satisfied or waived,
+6. when context fill reaches `contextCheckpointPercent` (default 70%).
 
 **F8.4 What Claude must write (enforced):**
-- **Per step:** the Completion Gate (F4) also requires `metadata.handoff`, one line saying what changed and what's next. It goes into `HANDOFF.md`.
-- **Narrative checkpoint tool:** the mod registers `mcp__taskmaster__checkpoint` (`$.tool.register`, `isDeferred: false`) with `{ summary, decisions[], open_questions[], next_action, current_step }`. The mod validates it (fields non-empty, step ids exist) and writes `HANDOFF.md`.
-- **Freshness gate:** while required steps are open, the Stop Gate also blocks if the narrative is *stale*, meaning no `checkpoint` call since the last write call. The block message asks for exactly one `checkpoint` call. That makes "leave a handoff before you stop" deterministic.
+- each G1 completion also needs a one-line `metadata.handoff` ("what changed / what's next"), which goes into `HANDOFF.md`. It's a claim, kept as narrative, never counted as evidence,
+- `taskmaster_checkpoint` (F3) writes the narrative. **Freshness gate:** while mandatory steps are open, G3 also blocks when there has been no checkpoint call since the last write call, and asks for exactly one. This shares G3's loop limits and fails open.
 
 **F8.5 Getting ahead of compaction:**
-- When `session.measure` reports context fill ≥ threshold, append a hidden user row asking Claude to call `checkpoint` now. The narrative is then written by Claude, while it still has full context.
-- At `classic.PreCompact`, Claude can't act (no model turn happens there). If the narrative is stale, the mod drafts one with `$.model.fork` (one question over the transcript as last sent, served from the prompt cache), marked `auto-drafted`. If the fork fails or the budget is spent, it falls back to the deterministic sections only.
-- `session.compact`: append to `instructions` so the summary keeps the run id, current step, and the `HANDOFF.md` path.
-- `classic.PostCompact` and `classic.SessionStart{source:'compact'}`: re-append a compact "contract + ledger + next action" user row so Claude continues on the right step.
+- At the context threshold, append a hidden user row asking Claude to call `taskmaster_checkpoint` *now*, while it still has full context.
+- At `PreCompact`, if the narrative is stale, the mod drafts one with `$.model.fork`. That's acceptable here, because it's a summary, not an audit. It is main-thread only and misses the newest tail, so the deterministic ledger tail is appended to it and the draft is marked `auto-drafted`. On failure, the mod falls back to the deterministic sections.
+- `session.compact`: add "preserve the run id, step ids, current step, and the `HANDOFF.md` path" to `instructions`.
+- `PostCompact` / `SessionStart{compact}`: send `additionalContext` with the contract, coverage, and next action.
 
-**F8.6 Cold-start resume** (`classic.SessionStart` with `source` `startup` or `clear`, or `session.start`):
-- Read `.taskmaster/active.json`. If an unfinished run exists, return `additionalContext` with a short resume briefing (goal, skill, steps ✓/●/○, next action, the `HANDOFF.md` path) and show a band entry: `Unfinished run: <skill> 4/7 · /taskmaster resume`.
-- **Offered, not forced** (`resumePolicy`: `offer` (default) | `auto` | `off`). A cold session may be about something else. The run turns active when the user runs `/taskmaster resume` or says to continue; `/taskmaster abandon` closes it.
-- On resume, the Plan Gate requires, before any write:
-  1. **reload the skill** with the Skill tool. The mod compares the skill's hash with the checkpoint's; if the steps changed, it shows the difference and asks the user which contract to keep,
-  2. **rebuild the task list** from the checkpoint. The built-in task list isn't relied on to persist across sessions, so the mod's checkpoint is the source of truth. The mod recreates tasks itself with `$.tool.call({ tool: 'TaskCreate', ... })` if the spike confirms that works; otherwise the deny message gives Claude the exact `TaskCreate` calls,
-  3. **read `HANDOFF.md`**: the gate is satisfied once the mod sees a `Read` of that path.
-- **Staleness check:** compare the git anchor and the hashes of the files the run wrote. Where the workspace changed since the checkpoint, the briefing says so, and steps whose evidence files changed drop to `needs re-verify`. They must be re-satisfied (for example, by re-running tests) before the final Stop.
-- `source: 'resume'` (the same transcript reopened): only a light reminder, since the history is already there.
+**F8.6 Cold-start resume** (`SessionStart` with `source` `startup` or `clear`):
+- If `active.json` shows an unfinished run, send a short briefing as `additionalContext` (goal, skill, step states, next action, the `HANDOFF.md` path) and show a band entry: `Unfinished run: <skill> 4/7 · /taskmaster resume`.
+- **Offered, not forced** (`resumePolicy`: `offer` (default), `auto`, or `off`).
+- On resume, the Plan Gate requires three things first:
+  1. **Reload the skill.** On a hash mismatch, show the difference in steps and ask the user which contract to keep, via `$.ui.ask`.
+  2. **Rebuild the tasks.** The mod seeds them with `$.tool.call(TaskCreate)` from the checkpoint; the built-in list isn't relied on to persist.
+  3. **Read `HANDOFF.md`.** The gate is satisfied once the mod sees a `Read` of that path.
+- **Staleness:** compare the git anchor and the hashes of files the run wrote. Steps whose evidence changed drop to `needs re-verify`.
+- `source: 'resume'` (the same transcript reopened): only a light reminder.
 
-**F8.7 Concurrency and integrity:**
-- `active.json` holds a lock: the owning session id and a heartbeat, refreshed with `$.clock.every`. A second live session gets a read-only briefing and can take over only with `/taskmaster resume --force`.
-- Every file carries a schema version. An unreadable or corrupt checkpoint is reported, never silently replaced: the last good copy is kept as `checkpoint.prev.json`.
-- `$.state` keeps the in-memory ledger across hot reloads; on load the mod reconciles it with the disk checkpoint, and the newer timestamp wins.
+**F8.7 Integrity:** a lock with a heartbeat in `active.json` (`$.clock.every`), so a second live session gets a read-only briefing and needs `--force` to take over. Files are schema-versioned. A corrupt checkpoint is reported and `checkpoint.prev.json` kept. On load, `$.state` and the disk are reconciled, and the newer one wins.
 
-### F9. Human control and overrides
-- **F9.1 Slash commands:** `/taskmaster` (status), `/taskmaster off|observe|guide|enforce|strict`, `/taskmaster waive <step> <reason>`, `/taskmaster checkpoint` (write now), `/taskmaster resume [run] [--force]`, `/taskmaster abandon [run]`, `/taskmaster runs` (list open and paused runs), `/taskmaster reset`, `/taskmaster report`, `/taskmaster exempt <skill>`.
-- **F9.2** Waivers are logged with the reason and shown in the report. Claude can *request* a waiver with `AskUserQuestion`; only the user grants one.
-- **F9.3 Redirect handling.** When the user submits a new prompt while a contract is active (`prompt.submit`), add a hidden note telling Claude to reconcile tasks: mark obsolete ones `deleted` with a reason rather than silently abandoning them. Do not block the user.
+### F9. Human control
+- `/taskmaster` (status) · `off | advisory | enforce | strict` · `waive <step> <reason>` · `contract show|edit <skill>` · `checkpoint` · `runs` · `resume [run] [--force]` · `abandon [run]` · `report` · `exempt <skill>`.
+- Esc (`isAborted`) freezes every gate for that turn.
 
 ### F10. Multiple skills, subagents, teammates
-- **F10.1 Contract stack.** A newly loaded skill becomes active. Earlier contracts must be completed or explicitly suspended; the Stop Gate considers every unsuspended contract.
-- **F10.2 Nested skills** (a skill that invokes another skill) get child contracts linked to the parent step.
-- **F10.3 Subagents.** `skill.prompt` fires for skills preloaded into subagents, and `tool.call` carries `agentId`, so each loop gets its own contract and ledger scope. Subagent task updates land in the session's task list.
+- Step ids are namespaced `skill:S#`. At most **2–3 contracts are enforced** at once; older ones drop to advisory. Conflicts between skills are shown to the user, not resolved automatically.
+- **Ownership by `agentId`:** the main loop's Stop doesn't block on tasks owned by a subagent that is still running. G4 holds subagents to their own tasks. (Subagents write to the session's shared task list.)
 
 ### F11. Visibility
-- **F11.1 Pane** (sidebar): contract steps with ✓ satisfied / ● in progress / ○ pending / ⊘ waived, gate events, audit verdicts, cost.
-- **F11.2 Band above the prompt:** `skill-x · 3/7 steps · #4 in progress · next gate: tests`.
-- **F11.3** A status line entry and a toast on each block.
-- **F11.4 End-of-session report** (`/taskmaster report` and on `session.end`): steps satisfied / waived / abandoned, blocks issued, overrides, auditor results.
+- Status line `skill · 3/7 · 1 waived`, the band, and toasts on blocks. In Phase 2, a Pane: steps ✓ / ● / ○ / ⊘ / ↻, gate events, audit findings, cost.
+- **Below every final answer** under an active contract (`turn.complete` text): steps satisfied, waived, and released unverified.
 
-### F12. Configuration (`userConfig` in `plugin.json`)
-- `strictness` (picker): `observe` | `guide` | `enforce` (default) | `strict`
-- `maxStopBlocks` (default 2), `auditor` (`off` | `final` | `critical` | `sampled`), `auditorModel`, `auditBudgetTokens`
-- `exemptSkills` (list), `writeToolAllowlist` (list)
-- `checkpointDir` (default `.taskmaster`), `checkpointGit` (`ignore` | `commit`), `checkpointEveryWrites` (default 10), `contextCheckpointPercent` (default 70), `resumePolicy` (`offer` | `auto` | `off`), `narrativeAutoDraft` (on/off: the `$.model.fork` fallback at PreCompact)
+### F12. Configuration (`userConfig`)
+- `strictness`: `observe` | `advisory` | `enforce` (default) | `strict`
+- `maxStopBlocks` (2), `audit` (`off` | `advisory` | `blocking`), `auditModel` (haiku), `auditTimeoutMs` (8000)
+- `exemptSkills`, `writeToolAllowlist`
+- `checkpointDir` (`.taskmaster`), `checkpointGit` (`ignore` | `commit`), `checkpointEveryWrites` (10), `contextCheckpointPercent` (70), `resumePolicy` (`offer` | `auto` | `off`), `narrativeAutoDraft` (on)
 
-### F13. Metrics and tuning
-- `$.store` keeps per-skill counters (blocks, false-positive overrides, waivers, audit fails, average overhead). This tells you which gates help and which only annoy.
-- An A/B harness: run the same tasks with the mod at `observe` and at `enforce`, and compare skipped steps, premature stops, user corrections, and token/time overhead.
+### F13. Metrics: the go/no-go signal
+- Log every block, waiver, release, and audit finding to `$.store`, per skill.
+- **Key metric:** the *share of Stop and G1 blocks that were followed by real work*, meaning new ledger entries that satisfy the step, rather than a waiver, a release, or the user turning the mod off. If that share is low on real skills, the gates are annoying rather than helpful: stop and rethink before building more.
+- An A/B harness compares the same tasks at `observe` and at `enforce`: skipped steps, premature stops, user corrections, and token/time overhead.
 
 ### F14. Quality and packaging
-- `claude plugin validate` and `tsc -p` on every change; `claude plugin test` suites for each gate (seed the ledger, raise `tool.call` / `classic.Stop`, assert deny or allow).
-- Version-pin to the API build. The API is early access and moves between releases, so add a startup self-check that logs which events fired.
-- Ship through a `.claude-plugin/marketplace.json` so it installs with `/plugin install taskmaster --marketplace <owner>/<repo>`.
+- `claude plugin validate` and `tsc -p` on every change. A `claude plugin test` suite for each gate, plus a compaction test and a cold-start test.
+- A startup self-check logs which events fired on this build, because the API is early access and changes between releases.
+- Install with `/plugin install taskmaster --marketplace <owner>/<repo>`.
 
-## 6. Strictness levels (what each one does)
+## 6. Strictness levels
 
-| Level | Contract injected | Plan Gate | Completion Gate | Stop Gate | Drift | Checkpoints | Auditor |
+| Level | Footer | Plan Gate | G1/G2 | G3/G4 Stop | Drift | Checkpoints | Audit |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| observe | no | log only | log only | log only | log only | mod-written only | off |
-| guide | yes | warn | warn | 1 block | warn | mod-written + nudge for narrative | off |
-| enforce (default) | yes | deny | deny | ≤2 blocks | warn | + freshness gate on Stop, resume gates | `final` if enabled |
-| strict | yes | deny | deny + evidence kinds | ≤3 blocks | deny writes without an in-progress task | + re-verify stale steps on resume | `critical` |
+| observe | no | log | log | log | log | mod-written | off |
+| advisory | yes | warn | warn | note below answer | warn | + nudges | advisory |
+| enforce (default) | yes | deny | deny | ≤2 blocks, fail-open | warn | + freshness gate, resume gates | advisory |
+| strict | yes | deny | deny; waiver needs user's yes | ≤3 blocks | deny writes with no task | + re-verify stale steps | may block once |
 
-At every level, including `observe`, the mod writes checkpoints. Saving state costs nothing and doesn't depend on Claude.
+Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. Low-confidence contracts stay advisory whatever the strictness level.
 
-## 7. Explicitly out of scope (aspirational, so not promised)
-- Guaranteeing the *quality* or *correctness* of the work. The mod enforces process and observable evidence, not truth.
-- Making Claude "try harder" in its reasoning. Gates change behavior at decision points; they don't raise capability.
-- Perfect understanding of arbitrary prose skills. Tier C extraction is best effort, so the skill author's frontmatter is the reliable path.
-- Preventing all gaming. Fabricated evidence text is caught only where it contradicts the ledger.
-- Enforcement where hooks don't run: settings hooks disabled, an organization policy plugin above it, or work done inside an MCP server's own process.
-- Rewriting a thread's system prompt mid-session.
+## 7. Out of scope (stated openly)
+- Measuring "effort" or quality. Semantic checks of non-code output.
+- Correctly extracting conditional workflows ("if X, then...") from arbitrary prose, or deciding whether a step applies to this particular request.
+- Turning LLM-extracted MUST/NEVER rules into tool denials. Phase 3 allows only frontmatter-declared guards, and those *ask* the user rather than deny.
+- Content in files a skill loads later, beyond what is re-parsed.
+- Workflow-tool or remote agents with no local loop. Plugins with no skill or command text (hooks only, MCP tools only, agent definitions only). **"Universal" honestly means any skill or command.**
+- Learning across sessions beyond per-skill overrides and counters.
+- Preventing every kind of gaming. The goal is *visible* skipping, not perfect prevention.
 
 ## 8. Risks and mitigations
 
 | Risk | Mitigation |
 | --- | --- |
-| Infinite Stop-block loops | Per-turn cap, no-progress detection, `stop_hook_active`, user interrupt honored |
-| False positives frustrate the user | Default `enforce` gates only on *required* steps; one-command overrides; per-skill exemption; metrics to tune |
-| Checklist theater | Evidence checked against the mod's own ledger; tasks tied to contract step ids, not free text |
-| Token/latency overhead | Deterministic gates are free; extraction cached per skill hash; auditor off by default and budgeted when on |
-| Contract lost on compaction | Checkpoint written *before* compaction (PreCompact + context-% nudge), `session.compact` instructions, re-injection on `PostCompact` / `SessionStart{compact}` |
-| Work lost in a cold session or a new container | On-disk checkpoint + `HANDOFF.md` in the working tree; `checkpointGit: commit` where the container is ephemeral; resume briefing + resume gates |
-| Stale checkpoint misleads the resumed session | Git anchor + file hashes; changed evidence drops steps to `needs re-verify` |
-| Two sessions fight over one run | Lock with heartbeat in `active.json`; takeover only with `--force` |
-| Secrets written to checkpoint files | Redaction before every write; `.taskmaster/` excluded from git by default |
-| Narrative checkpoint is empty boilerplate | Schema validation; freshness tied to write activity; the auditor (if on) reviews `HANDOFF.md` at the final stop |
-| Informational skills get gated | Classified `reference` → observe-only |
-| API drift between Claude Code builds | Pin the build, startup self-check, `claude plugin validate` in CI |
-| Mod bug blocks all work | Gates fail closed *with* an override; `/taskmaster off` always works; a crash in a non-gate feature fails open |
+| Stop-block loops | 2 blocks per contract per turn, re-block only after ledger progress, release with a visible note, never with background work, fail open |
+| False blocks on legitimate waits | `await_user` tool + question detection; LLM-extracted contracts default to advisory; every deny explains how to waive |
+| Checklist theater | Tasks tied to `[S#]` steps; evidence comes from the ledger, not task metadata; verify specs match command and error flag; deletes redirected to waive |
+| Wrong contract from extraction | Confidence + agreement with the deterministic parse; first-run review and per-skill override; advisory when unsure |
+| Cost and latency | Extraction once per skill version; audit only at Stop, on curated evidence; `timeoutMs`; no model call per tool call |
+| Contract lost on compaction | Checkpoint before compaction; `instructions`; re-injection on `PostCompact` / `SessionStart{compact}` |
+| Work lost in a cold session or new container | On-disk checkpoint + `HANDOFF.md`; `checkpointGit: commit` for ephemeral containers; resume gates |
+| Stale checkpoint | Git anchor + file hashes → `needs re-verify` |
+| Two sessions on one run | Lock with heartbeat; `--force` to take over |
+| Secrets in checkpoints | Redaction; excluded from git by default |
+| Mod bug traps the user | Stop gate fails open; `/taskmaster off` and Esc always win |
+| API drift between builds | Pin the build; startup self-check; validate in CI |
 
 ## 9. Build order
 
-**Phase 0: spike (1–2 days).** Observe-only mod: `skill.prompt` capture, task-tool observation, Pane, JSONL log. *Exit:* on your build, confirm which events fire, in what order (`tool.check` vs `tool.call`), and for which loops (main vs subagent); whether `$.tool.call` can create tasks; whether the built-in task list persists across sessions; what `SessionStart.source` reads after `/clear` and after auto-compaction.
+**Phase 0: spike (1–2 days).** Observe-only: capture skills, record the ledger, log to the journal. **Confirm on your build:**
+1. the order of `tool.check` and `tool.call`,
+2. that `$.tool.call(TaskCreate)` seeds tasks Claude actually sees,
+3. whether the built-in task list persists across sessions,
+4. `SessionStart.source` after `/clear` and after auto-compaction,
+5. that a `classic.Stop` block makes Claude continue,
+6. how skills preloaded into subagents are attributed.
 
-**Phase 1: MVP (about 1–2 weeks).** F1.1–F1.3 (Tiers A and B only), F1.5, F2, F4 (deterministic), F5 with the loop breaker, **F8.1–F8.6 checkpoints and resume** (without the `$.model.fork` auto-draft), F9.1–F9.2, the band and status line. *Exit:* a workflow skill run at `enforce` can't end with uncovered required steps or evidence-free completions, never loops more than 2 blocks, and **a fresh session started after `/clear`, or on a new clone of a committed checkpoint, resumes at the right step with no transcript.**
+**Phase 1: MVP (about 1–2 weeks; ~600–900 lines including checkpoints).**
+- the deterministic parse, cached Haiku extraction, and frontmatter support (F1.1–F1.7),
+- the protocol footer and task seeding,
+- the ledger (F2) and the three tools (F3),
+- G1–G3 with the F5 safety rules,
+- checkpoints and resume (F8.1–F8.6, without the fork auto-draft),
+- `/taskmaster`, the status line, the summary below the answer, and F13 logging.
 
-**Phase 2: hardening.** F3 Plan Gate, F6 Drift, F8.5 auto-draft, F8.7 locking, F10 multi-skill and subagents, F12 config, tests for each gate, including a compaction test and a cold-start test.
+*Exit:* on 5–10 real skills, the share of blocks that led to real work is high, there's never more than 2 blocks per turn, and the compaction test and cold-start test both pass.
 
-**Phase 3: judgment.** F1.3 Tier C LLM extraction (cached), F1.4 rules, F7 Auditor with budgets.
+**Phase 2: hardening.** The Plan Gate, G4, Drift, the advisory audit, question detection, redirect handling, multiple skills and subagent ownership, the Pane, F8.5 auto-draft, F8.7 locking, the per-skill contract editor, and the full test suite.
 
-**Phase 4: measure and ship.** F11.4 report, F13 metrics and A/B harness, F14 marketplace packaging.
+**Phase 3: judgment.** A blocking audit (one bite), the verifier subagent for semantic verify specs, frontmatter constraint guards that ask the user, and the metrics view and A/B harness.
+
+**Phase 4: ship.** Marketplace packaging, docs, and an authoring guide for the `taskmaster:` frontmatter key.
 
 ## 10. Definition of done for the MVP
-1. Load any skill with a numbered procedure. The mod shows its steps in the band with no configuration.
-2. Claude cannot mark a step's task `completed` with zero recorded work, or without the required evidence kind.
-3. Claude cannot end its turn with an uncovered or open required step more than `maxStopBlocks` times; after that, the stop is allowed and the contract is reported as abandoned.
-4. `/taskmaster waive`, `/taskmaster off`, and the user's Esc interrupt always win.
-5. Reference skills cause zero blocks.
-6. **Compaction test:** force `/compact` mid-run. The next turn continues on the correct step without re-planning, and `checkpoint.json` was written before the compaction.
-7. **Cold-start test:** `/clear` (or open a brand-new session on the same working tree) mid-run. The session gets the resume briefing, and after `/taskmaster resume` it rebuilds the task list, re-reads `HANDOFF.md`, and finishes the remaining steps. Steps already satisfied aren't redone unless their evidence went stale.
+1. Load any skill with a numbered procedure. Its steps appear in the status line with no configuration, as `enforce` or `advisory` depending on confidence.
+2. Claude can't complete a step's task with no recorded work, or without meeting its `verify` spec, and can't delete a step's task. Each deny explains how to waive.
+3. Claude can't end its turn with open mandatory steps more than twice. After that, the stop goes through with a visible `released: ...` note.
+4. `await_user`, waivers, Esc, and `/taskmaster off` always win. Reference skills cause no blocks.
+5. **Compaction test:** force `/compact` mid-run. The next turn continues on the correct step without re-planning, and the checkpoint was written before compaction.
+6. **Cold-start test:** run `/clear`, or open a brand-new session on a working tree with a committed checkpoint. The session gets the briefing, and after `/taskmaster resume` it reloads the skill, rebuilds the tasks, reads `HANDOFF.md`, and finishes only the remaining or stale steps.
+7. **Go/no-go:** the F13 metric is reported for the 5–10 test skills.
+
+## Appendix: changes made after the advisor review
+- Reframed the promise from "works harder" to "never silently skips, never claims done without evidence, never loses its place."
+- Evidence is the mod's own ledger only; task metadata is narrative. Added G2 (no silent deletes) and `verify` specs matched on command and error flag.
+- Added the `waive` and `await_user` tools; the Stop gate fails open and allows legitimate waits.
+- Auditor: `$.model.complete` (Haiku, `timeoutMs`) on curated evidence, advisory first, replacing `$.model.fork`. Verifier subagents run at task completion, not at Stop.
+- `skill.prompt` has no `agentId`, so the loop is attributed through the `Skill` tool's `tool.call` or `agent.spawn`.
+- LLM extraction moved into the MVP, with confidence and an advisory default; a per-skill override was added.
+- Multiple contracts are capped and namespaced, ownership is tracked by `agentId`, and `isAborted` freezes the gates.
+- Added the go/no-go metric (share of blocks followed by real work) as the MVP exit criterion.
+- Scope made honest: "universal" means any skill or command, not hooks-only or MCP-only plugins.
