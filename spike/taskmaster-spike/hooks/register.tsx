@@ -16,9 +16,10 @@ import { asRecord, asString, clip, MARK, shortHash } from './util'
 
 const PLUGIN = 'taskmaster-spike'
 const PANE = 'tm-spike'
+// Relative to the project root. A shell `cd` moves the session's working
+// directory (which relative $.fs paths follow) but not $.session.root(), so
+// session.start anchors every path there.
 const DIR = '.taskmaster/spike'
-const FINDINGS = `${DIR}/findings.json`
-const REPORT = `${DIR}/FINDINGS.md`
 const SKILL = 'spike-probe'
 
 const checksAtom = atom({ plugin: 'taskmaster-spike', key: 'checks' } as const, {} as Checks, {
@@ -96,6 +97,9 @@ export const register: Register = on => {
   const early: { event: JournalEvent; ts: number }[] = []
   let sessionId = ''
   let version = 'unknown'
+  let dir = DIR
+  const findingsPath = (): string => `${dir}/findings.json`
+  const reportPath = (): string => `${dir}/FINDINGS.md`
   let findings: Findings = { schema: 1, checks: {}, sources: [], snapshots: [], attribution: {}, sessions: [] }
   const probes = new Map<ProbeName, Probe>()
   const openCalls = new Map<string, OpenCall>()
@@ -131,7 +135,7 @@ export const register: Register = on => {
       return
     }
     try {
-      await io.write(FINDINGS, `${JSON.stringify(findings, null, 2)}\n`)
+      await io.write(findingsPath(), `${JSON.stringify(findings, null, 2)}\n`)
       await io.storeSet('findings', findings)
     } catch {
       // Findings stay in memory; the next save tries again.
@@ -144,7 +148,7 @@ export const register: Register = on => {
     }
     let loaded: unknown
     try {
-      loaded = JSON.parse(await io.read(FINDINGS))
+      loaded = JSON.parse(await io.read(findingsPath()))
     } catch {
       loaded = await io.storeGet('findings')
     }
@@ -377,7 +381,7 @@ export const register: Register = on => {
       return 'journal-stress: the session is not ready yet.'
     }
     const started = await io.now()
-    const stress = new Journal(io, `${DIR}/stress-${started}`)
+    const stress = new Journal(io, `${dir}/stress-${started}`)
     for (let i = 0; i < 1200; i += 1) {
       stress.add({ kind: 'stress', i, pad: 'x'.repeat(180) }, started)
     }
@@ -456,7 +460,7 @@ export const register: Register = on => {
       generatedAt: new Date(await io.now()).toISOString(),
       sessions: findings.sessions.length,
     })
-    await io.write(REPORT, text)
+    await io.write(reportPath(), text)
   }
 
   async function updateAttribution(via: string): Promise<void> {
@@ -538,8 +542,9 @@ export const register: Register = on => {
 
     sessionId = await $.session.id()
     version = (await $.session.version()).version
+    dir = `${(await $.session.root()).replace(/\/+$/, '')}/${DIR}`
     const started = await $.clock.now()
-    journal = new Journal(io, `${DIR}/journal-${sessionId.slice(0, 8)}-${started}`)
+    journal = new Journal(io, `${dir}/journal-${sessionId.slice(0, 8)}-${started}`)
     for (const { event } of early.splice(0)) {
       journal.add(event, started)
     }
@@ -1026,7 +1031,7 @@ export const register: Register = on => {
         return { text: await armProbe(arg) }
       case 'report':
         await writeReport()
-        return { text: `Wrote ${REPORT}.\n\n${formatStatus(findings.checks)}` }
+        return { text: `Wrote ${reportPath()}.\n\n${formatStatus(findings.checks)}` }
       case 'pane':
         await $.ui.open({ id: PANE, title: 'Taskmaster spike' })
         return { text: 'Opened the Taskmaster spike pane.' }

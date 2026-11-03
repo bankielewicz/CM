@@ -12,6 +12,7 @@ function engine(on: On, tasks: Record<string, string> = {}): string[] {
   mock.store(on)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'test-session-0001' }))
+  on('session.root', () => ({ value: '/repo' }))
   on('session.version', () => ({ value: { version: '2.1.317', base: '2.1.317', builtAt: '2026-01-01T00:00:00Z' } }))
   on('command.register', () => ({ value: { command: 'tm-spike' } }))
   on('agent.register', () => ({ value: { agent: 'taskmaster-spike:skill-preload' } }))
@@ -136,8 +137,9 @@ test('the journal is written under .taskmaster/spike', async ($, on) => {
   await spike($, 'report')
 
   // Relative paths reach the engine resolved against the working directory.
-  expect(writes.some(p => p.endsWith('/.taskmaster/spike/FINDINGS.md'))).toBe(true)
-  expect(writes.some(p => p.endsWith('/.taskmaster/spike/findings.json'))).toBe(true)
+  // Paths are anchored to $.session.root(), not the shell's working directory.
+  expect(writes).toContain('/repo/.taskmaster/spike/FINDINGS.md')
+  expect(writes).toContain('/repo/.taskmaster/spike/findings.json')
 })
 
 test('the Gate A verdict reads the blocking checks', () => {
