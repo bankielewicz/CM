@@ -178,6 +178,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
 - Secrets are redacted before every write.
 - **`checkpointGit: commit` (default, approved).** At milestone checkpoints (step completed, PreCompact, Stop with open work, session end), the mod commits `.taskmaster/` (always at `$.session.root()`, never relative to a working directory a shell `cd` can move) alone, through `$.process.run`: first `git add -- .taskmaster/`, then `git commit --only -m "taskmaster: checkpoint <run> <step>" -- .taskmaster/`. The `add` is required: `commit --only` refuses paths git doesn't track yet, and a new run's files are untracked. `--only` keeps the user's other staged work out of the commit and leaves it staged (verified locally; the spike re-checks on your build). The fixed prefix makes these commits easy to squash or filter before a PR. Commits are throttled to at most one per milestone. Other values: `ignore` (excluded through `.git/info/exclude`) and, in Phase 2, `ref` (commit to `refs/taskmaster/<run>` with a temporary index, so the working branch history isn't touched).
 - **`checkpointPush`:** `off` (default) or `milestone`. Commits survive a new session on the same clone. **In ephemeral containers (cloud sessions), the commits must also be pushed to survive**, so set `milestone` there, or rely on the session's own push.
+- **First-commit notice (owner decision, 2026-11-03).** With `checkpointGit: commit`, before its first checkpoint commit in a repository whose remote is public, or whose visibility can't be determined, the mod asks once through `$.ui.ask`. The notice says that checkpoints hold the original request, decisions and commands, that secrets are redacted, and that the next `git push` publishes the rest. The user keeps committing or switches to `checkpointGit: ignore`; committing stays the default. Visibility comes from `$.process.run` (`gh repo view --json visibility`): no `gh`, or a host other than GitHub, counts as unknown, and the notice then says the remote "may be public". The answer is stored per repository in `$.store`, so it is asked again on a new machine. A repository with no remote, or a private one, gets no notice. A headless run has nobody to ask: it keeps the default and logs that the notice wasn't shown.
 
 **F8.2 Contents**, enough to resume with no transcript:
 - the run id, schema version, the sessions involved, and timestamps,
@@ -294,7 +295,7 @@ A third-party mod can't send events to Anthropic's telemetry or to the user's Op
 - A small offline analysis script, outside the mod (DuckDB or pandas), computes the go/no-go table (§10) per arm and per `contract_source`, with bootstrap 95% confidence intervals.
 
 ### F14. Quality and packaging
-- `claude plugin validate` and `tsc -p` on every change. A `claude plugin test` suite for each gate, plus a compaction test and a cold-start test.
+- `claude plugin validate` and `tsc -p` on every change. A `claude plugin test` suite for each gate, plus a compaction test and a cold-start test. Written test-first, with `npm run coverage` holding the mod to at least 95% line coverage (see `CLAUDE.md`).
 - A startup self-check logs which events fired on this build, because the API is early access and changes between releases.
 - Install with `/plugin install taskmaster --marketplace <owner>/<repo>`.
 
@@ -500,7 +501,8 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 | Work lost in a cold session or new container | On-disk checkpoint + `HANDOFF.md`; `checkpointGit: commit` for ephemeral containers; resume gates |
 | Stale checkpoint | Git anchor + file hashes → `needs re-verify` |
 | Two sessions on one run | Lock with heartbeat; `--force` to take over |
-| Secrets in checkpoints | Redaction; excluded from git by default |
+| Secrets in checkpoints | Redaction before every write |
+| Requests and decisions reach git history through checkpoints | Committed by default (owner decision, reconfirmed 2026-11-03). `checkpointPush` is off, but an ordinary `git push` includes them, so a first-commit notice warns on a public or unknown remote (F8.1); `checkpointGit: ignore` opts out |
 | Mod bug traps the user | Stop gate fails open; `/taskmaster off` and Esc always win |
 | API drift between builds | Pin the build; startup self-check; validate in CI |
 | Self-improvement loop drifts toward "enforce nothing" | Proposals are never applied automatically; replay must show saves weren't lost; only user signals trip the circuit breaker; RCA may return `true_positive` |
@@ -625,7 +627,7 @@ Write the thresholds down before the evaluation runs and don't move them during 
 4. `await_user`, waivers, Esc, and `/taskmaster off` always win. Reference skills cause no blocks.
 5. **Compaction test:** force `/compact` mid-run. The next turn continues on the correct step without re-planning, and the checkpoint was written before compaction.
 6. **Cold-start test:** run `/clear`, or open a brand-new session on a working tree with a committed checkpoint. The session gets the briefing, and after `/taskmaster resume` it reloads the skill, rebuilds the tasks, reads `HANDOFF.md`, and finishes only the remaining or stale steps.
-7. **Checkpoints are committed:** each milestone produces one `taskmaster: checkpoint ...` commit that contains only `.taskmaster/`.
+7. **Checkpoints are committed:** each milestone produces one `taskmaster: checkpoint ...` commit that contains only `.taskmaster/`. With a public or unknown remote, the first-commit notice (F8.1) appears once before the first of them.
 8. **Metrics are complete:** every gate decision, intervention, and run end produces a schema-valid event tagged with `arm` and `contract_source`. `/taskmaster metrics export` produces a bundle the analysis script turns into the §10.2 table.
 9. **Canaries work:** each tripwire in F15.1 creates an incident, and `/taskmaster retro` turns queued incidents into RCAs with evidence citations and a taxonomy category. The circuit breaker trips on 3 user friction signals and never on Claude's own waivers.
 10. **The frontmatter advisor works:** asking "recommend taskmaster frontmatter for `<skill>`" produces a recommendation that passes validation, with a reason for each step and a preview of how enforcement changes.

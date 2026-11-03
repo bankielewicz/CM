@@ -1,0 +1,78 @@
+# Blocks a merge unless every mod has passing tests and at least 95% line coverage.
+#
+# Make the `mod-coverage` job a required status check. GitHub's "Restrict code
+# coverage" rule doesn't wait for uploads, so without that a PR could merge first.
+# This runs on every PR, with no path filter: a required check that gets filtered
+# out never reports, and the PR waits on it forever.
+name: Mod coverage
+
+on:
+  pull_request:
+  push:
+    # The default branch, so GitHub has a baseline to compare PRs against.
+    branches: [claude/jolly-thompson-5z0tnc]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  code-quality: write
+
+concurrency:
+  group: mod-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mod-coverage:
+    name: mod-coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The build the mods are written against. Bump it on purpose, then fix what breaks.
+      CLAUDE_CODE_VERSION: 2.1.317
+      DISABLE_AUTOUPDATER: 1
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The PR's head, not the merge commit, so coverage lines match the diff.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install the coverage tools
+        run: npm ci
+
+      - name: Install Claude Code
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && claude --version
+
+      - name: Test the coverage gate
+        run: npm test
+
+      - name: Validate every mod
+        run: |
+          status=0
+          for manifest in $(git ls-files ':(glob)**/.claude-plugin/plugin.json'); do
+            dir="$(dirname "$(dirname "$manifest")")"
+            claude plugin validate "$dir" || { echo "::error::$dir: validate failed"; status=1; }
+          done
+          exit $status
+
+      - name: Require 95% line coverage
+        run: npm run coverage
+
+      # Runs even when the gate fails, so GitHub sees the real number. Upload errors
+      # stay warnings: the step above is the gate, and uploads need Code Quality on.
+      # Skipped when every mod is exempt, because the gate writes no report then.
+      - name: Upload coverage to GitHub
+        if: >-
+          always() && hashFiles('coverage/cobertura-coverage.xml') != '' &&
+          (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/upload-code-coverage@2b21a77928be8d5168c2b9581a67f2adbebacc52 # v1.4.4
+        with:
+          file: coverage/cobertura-coverage.xml
+          language: TypeScript
+          label: code-coverage/mods
+          fail-on-error: false

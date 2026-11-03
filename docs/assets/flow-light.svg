@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="63 56 634 424" width="760" height="508" role="img" aria-labelledby="title desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <title id="title">How Taskmaster works (planned design)</title>
+  <desc id="desc">A flow of six stages: skill, steps, tasks, evidence record, gates, checkpoint.</desc>
+  <text x="64" y="84" font-size="20" font-weight="600" fill="#59636e">The planned design</text>
+  <path d="M240 176H285" stroke="#59636e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M284 171L291 176L284 181Z" fill="#59636e"/>
+  <path d="M468 176H513" stroke="#59636e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M512 171L519 176L512 181Z" fill="#59636e"/>
+  <path d="M608 240V288H152V329" stroke="#59636e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M147 328L152 335L157 328Z" fill="#59636e"/>
+  <path d="M240 400H285" stroke="#59636e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M284 395L291 400L284 405Z" fill="#59636e"/>
+  <path d="M468 400H513" stroke="#59636e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M512 395L519 400L512 405Z" fill="#59636e"/>
+  <rect x="64.5" y="112.5" width="175" height="127" rx="8" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <text x="152" y="159" font-size="20" font-weight="700" fill="#1f2328" text-anchor="middle">Skill</text>
+  <text x="152" y="185" font-size="18" fill="#1f2328" text-anchor="middle">Any skill or</text>,<text x="152" y="209" font-size="18" fill="#1f2328" text-anchor="middle">command</text>
+  <rect x="292.5" y="112.5" width="175" height="127" rx="8" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <text x="380" y="159" font-size="20" font-weight="700" fill="#1f2328" text-anchor="middle">Steps</text>
+  <text x="380" y="185" font-size="18" fill="#1f2328" text-anchor="middle">Read from the</text>,<text x="380" y="209" font-size="18" fill="#1f2328" text-anchor="middle">skill</text>
+  <rect x="520.5" y="112.5" width="175" height="127" rx="8" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <text x="608" y="159" font-size="20" font-weight="700" fill="#1f2328" text-anchor="middle">Tasks</text>
+  <text x="608" y="185" font-size="18" fill="#1f2328" text-anchor="middle">Each step is</text>,<text x="608" y="209" font-size="18" fill="#1f2328" text-anchor="middle">tracked</text>
+  <rect x="64.5" y="336.5" width="175" height="127" rx="8" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <text x="152" y="370" font-size="20" font-weight="700" fill="#1f2328" text-anchor="middle">Evidence</text>,<text x="152" y="396" font-size="20" font-weight="700" fill="#1f2328" text-anchor="middle">record</text>
+  <text x="152" y="422" font-size="18" fill="#1f2328" text-anchor="middle">What Taskmaster</text>,<text x="152" y="446" font-size="18" fill="#1f2328" text-anchor="middle">saw</text>
+  <rect x="292.5" y="336.5" width="175" height="127" rx="8" fill="#dbeafe"/>
+  <text x="380" y="383" font-size="20" font-weight="700" fill="#1f2328" text-anchor="middle">Gates</text>
+  <text x="380" y="409" font-size="18" fill="#1f2328" text-anchor="middle">At completing</text>,<text x="380" y="433" font-size="18" fill="#1f2328" text-anchor="middle">and stopping</text>
+  <rect x="520.5" y="336.5" width="175" height="127" rx="8" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <text x="608" y="395" font-size="20" font-weight="700" fill="#1f2328" text-anchor="middle">Checkpoint</text>
+  <text x="608" y="421" font-size="18" fill="#1f2328" text-anchor="middle">Saved on disk</text>
+</svg>

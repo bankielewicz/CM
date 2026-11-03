@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/coverage-stop-hook.mjs\"",
+            "timeout": 300,
+            "statusMessage": "Checking mod coverage"
+          }
+        ]
+      }
+    ]
+  }
+}
