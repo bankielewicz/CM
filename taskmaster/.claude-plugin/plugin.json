@@ -36,7 +36,7 @@
     "checkpointDir": {
       "type": "string",
       "title": "Checkpoint folder",
-      "description": "Where checkpoints are kept, relative to the project root. A path outside the project is refused.",
+      "description": "Where checkpoints are kept, relative to the project root. A path outside the project, or inside .git, is refused.",
       "default": ".taskmaster"
     },
     "checkpointGit": {
@@ -91,7 +91,7 @@
     "metricsDir": {
       "type": "string",
       "title": "Metrics folder",
-      "description": "Where metrics are kept, relative to the project root. A path outside the project is refused.",
+      "description": "Where metrics are kept, relative to the project root. A path outside the project, or inside .git, is refused.",
       "default": ".taskmaster/metrics"
     },
     "ratingSample": {
@@ -153,7 +153,7 @@
     "overrideDir": {
       "type": "string",
       "title": "Override folder",
-      "description": "Where per-skill contract overrides are kept, relative to the project root. A path outside the project is refused.",
+      "description": "Where per-skill contract overrides are kept, relative to the project root. A path outside the project, or inside .git, is refused.",
       "default": ".taskmaster/overrides"
     }
   }

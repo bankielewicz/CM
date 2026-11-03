@@ -80,11 +80,12 @@ function pick(key: Key, value: unknown): unknown {
   return choose(text, CHOICES[key], fallback as string)
 }
 
-/** A folder relative to the project root, tidied; undefined for one that leaves it, or is the root itself. */
+/** A folder relative to the project root, tidied; undefined for one that leaves it, is the root itself, or is inside `.git`. */
 function folder(path: string): string | undefined {
   if (/^([/\\~]|[A-Za-z]:)/.test(path)) return undefined
   const parts = path.split(/[/\\]+/).filter(part => part !== '' && part !== '.')
   if (parts.length === 0 || parts.includes('..')) return undefined
+  if (parts.some(part => part.toLowerCase() === '.git')) return undefined
   return parts.join('/')
 }
 
