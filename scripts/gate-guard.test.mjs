@@ -21,6 +21,7 @@ test('every file that can switch off the gate counts as protected', () => {
     'coverage-exempt.json',
     'package.json',
     'package-lock.json',
+    'npm-shrinkwrap.json',
     '.npmrc',
     '.claude/settings.json',
     '.claude/settings.local.json',
@@ -102,6 +103,12 @@ test('CI runs the gate through node, so npm configuration cannot skip it', () =>
   assert.doesNotMatch(yml, /run: npm (test|run)\b/)
   assert.match(yml, /run: node --test scripts\/\*\.test\.mjs$/m)
   assert.match(yml, /run: node scripts\/mod-coverage\.mjs$/m)
+})
+
+test('CI installs without running install scripts, so a dependency cannot rewrite the gate', () => {
+  const yml = readFileSync(join(ROOT, '.github/workflows/mod-coverage.yml'), 'utf8')
+  assert.match(yml, /run: npm ci --ignore-scripts$/m)
+  assert.doesNotMatch(yml, /run: npm ci$/m)
 })
 
 test('Claude Code denies edits to every protected path', () => {

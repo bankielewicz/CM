@@ -1,4 +1,4 @@
-# Blocks a merge unless every mod has passing tests and at least 95% line coverage.
+# Blocks a merge unless every mod has passing tests and at least 95% line and function coverage.
 #
 # Make the `mod-coverage` job a required status check. GitHub's "Restrict code
 # coverage" rule doesn't wait for uploads, so without that a PR could merge first.
@@ -42,8 +42,9 @@ jobs:
           node-version: 24
           cache: npm
 
+      # No install scripts: they'd run before the gate, and could rewrite it. The tools need none.
       - name: Install the coverage tools
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Install Claude Code
         run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && claude --version
@@ -62,7 +63,7 @@ jobs:
           done
           exit $status
 
-      - name: Require 95% line coverage
+      - name: Require 95% line and function coverage
         run: node scripts/mod-coverage.mjs
 
       # Runs even when the gate fails, so GitHub sees the real number. Upload errors
