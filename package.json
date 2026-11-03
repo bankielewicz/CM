@@ -11,6 +11,7 @@
     "node": ">=22"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.12",
     "istanbul-lib-coverage": "3.2.2",
     "istanbul-lib-instrument": "6.0.3",
     "istanbul-lib-report": "3.0.1",

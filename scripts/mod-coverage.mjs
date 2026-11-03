@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os'
 import { basename, extname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { parse } from '@babel/parser'
 import libCoverage from 'istanbul-lib-coverage'
 import { createInstrumenter } from 'istanbul-lib-instrument'
 import libReport from 'istanbul-lib-report'
@@ -48,17 +49,31 @@ const SKIPPED_DIRS = new Set(['.claude', '.git', 'node_modules'])
 // Takes only the counters: the maps are known from instrumenting.
 const COUNTERS = `(cov: any) => Object.fromEntries(Object.entries(cov ?? {}).map(([path, c]: any) => [path, { s: c.s, f: c.f, b: c.b }]))`
 
+/**
+ * An `istanbul ignore` comment would drop code from the count, so it doesn't work
+ * here. Only parsed comments change: the same words in a string, template or regular
+ * expression are the mod's behaviour, and line numbers stay as they were.
+ */
+function disableCoverageHints(source, plugins) {
+  const hint = /\bistanbul(?=\s+ignore\b)/g
+  const { comments } = parse(source, { sourceType: 'module', plugins })
+  return comments.reduceRight((text, { start, end }) => {
+    const comment = text.slice(start, end).replace(hint, 'not-istanbul')
+    return text.slice(0, start) + comment + text.slice(end)
+  }, source)
+}
+
 /** Instruments one source file, and returns its code and its zeroed coverage. */
 export function instrumentSource(source, path) {
+  const parserPlugins = /x$/.test(extname(path)) ? ['typescript', 'jsx'] : ['typescript']
   const instrumenter = createInstrumenter({
     esModules: true,
     compact: false,
     coverageGlobalScope: 'globalThis',
     coverageGlobalScopeFunc: false,
-    parserPlugins: /x$/.test(extname(path)) ? ['typescript', 'jsx'] : ['typescript'],
+    parserPlugins,
   })
-  // An `istanbul ignore` comment would drop code from the count, so it doesn't work here.
-  const instrumented = instrumenter.instrumentSync(source.replace(/\bistanbul\s+ignore\b/g, 'not-ignored'), path)
+  const instrumented = instrumenter.instrumentSync(disableCoverageHints(source, parserPlugins), path)
   const coverage = instrumenter.lastFileCoverage()
   const code = instrumented.replace(
     /\(cov_\w+\(\)\.s\[(\d+)\]\+\+,\s*(atom|memberOf|derive)\(/g,

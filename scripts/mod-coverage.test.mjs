@@ -121,6 +121,44 @@ test('an istanbul ignore comment does not take code out of the count', () => {
   assert.equal(Object.keys(hinted.coverage.branchMap).length, Object.keys(plain.coverage.branchMap).length)
 })
 
+test('line comments and file-level hints do not take code out of the count either', () => {
+  const plain = `export const f = (x: number) => {\n  if (x) return 1\n  return 2\n}\n`
+  const expected = Object.keys(instrumentSource(plain, 'hooks/a.ts').coverage.statementMap).length
+  const lineHint = `export const f = (x: number) => {\n  // istanbul ignore if\n  if (x) return 1\n  return 2\n}\n`
+  const fileHint = `/* istanbul ignore file */\n${plain}`
+  assert.equal(Object.keys(instrumentSource(lineHint, 'hooks/a.ts').coverage.statementMap).length, expected)
+  assert.equal(Object.keys(instrumentSource(fileHint, 'hooks/a.ts').coverage.statementMap).length, expected)
+})
+
+test('a hook that mentions istanbul ignore outside a comment keeps that text', () => {
+  const source = [
+    `export const a = () => 'istanbul ignore next'`,
+    'export const b = () => `istanbul ignore next`',
+    `export const c = (s: string) => /istanbul ignore next/.test(s)`,
+    '',
+  ].join('\n')
+  const { code } = instrumentSource(source, 'hooks/a.ts')
+  assert.equal(code.match(/istanbul ignore next/g)?.length, 3)
+})
+
+test('a hook whose output mentions istanbul ignore behaves the same under the gate', () => {
+  const root = scratch()
+  const tests = `${KIT}test('denies with the exact text', async ($: any, on: any) => {
+  on('tool.call', () => ({ result: {} }))
+  const r = await $.tool.call({ tool: 'Write', file_path: '/a', content: 'x' })
+  expect(r.deny).toBe('istanbul ignore next')
+})\n`
+  const dir = mod(root, 'm', tests, {
+    'hooks/register.ts': `export const register = (on: any) => {
+  on('tool.call', () => ({ deny: 'istanbul ignore next' }))
+}
+`,
+  })
+  const { status, out } = runCli(root, '--out', join(root, 'cov'), dir)
+  assert.equal(status, 0, out)
+  assert.match(out, /PASS/)
+})
+
 test('instrumentSource handles TSX', () => {
   const { coverage } = instrumentSource(`export const v = (x: number) => <Text>{x}</Text>\n`, 'hooks/a.tsx')
   assert.ok(Object.keys(coverage.statementMap).length > 0)
