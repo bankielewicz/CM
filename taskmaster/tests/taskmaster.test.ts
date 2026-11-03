@@ -254,6 +254,14 @@ test('a hung version lookup holds up no event', { timeoutMs: 3_000 }, async ($, 
   expect(world.writes).toEqual([])
 })
 
+test('a failing session.start still starts the self-check', { timeoutMs: 3_000 }, async ($, on) => {
+  const world = engine(on, { failStart: true })
+  let failed = false
+  await start($).catch(() => { failed = true })
+  await untilSeen(world, 'session.start')
+  expect(failed).toBe(true)
+})
+
 test('the scaffold shows nothing: no status line or toast', async ($, on) => {
   const world = engine(on)
   await $.classic.SessionStart({ source: 'startup' })
