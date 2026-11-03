@@ -71,7 +71,7 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 
 ## Where the work stands
 
-`spike/taskmaster-spike/GATE-A-TASKS.md` is the durable checklist, and the first open item is the next step. Built-in tasks don't survive `/clear` or a new session, so re-create them from that file. `RUNBOOK.md` has the steps for each probe and how to read its result. Gate A is recorded in plan §10.1 (GO, 2026-11-03).
+`docs/phase-1-tasks.md` is the durable checklist for the Phase 1 MVP, and the first open item is the next step. Gate A's checklist, `spike/taskmaster-spike/GATE-A-TASKS.md`, is finished. Built-in tasks don't survive `/clear` or a new session, so re-create them from that file. `RUNBOOK.md` has the steps for each probe and how to read its result. Gate A is recorded in plan §10.1 (GO, 2026-11-03).
 
 - `.taskmaster/spike/` isn't committed, so anything Gate A needs goes into plan §10.1. New spike learnings go into plan §9, and behaviour changes into `RUNBOOK.md`.
 - The default branch is protected and nobody can bypass the ruleset, so every change lands through a PR, including where `GATE-A-TASKS.md` says to push.

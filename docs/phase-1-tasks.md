@@ -1,0 +1,175 @@
+# Phase 1 MVP: tasks
+
+This is the durable task list for the Phase 1 MVP prototype (`docs/taskmaster-plan.md` §9, "Phase 1"). Gate A passed (§10.1, GO, 2026-11-03). The first open item is the next step. Claude's built-in task list doesn't survive `/clear` or a new session, so re-create the open items from this file. The ids are `P1.n`. The milestones (M0–M9) are in build order, and each task names what it depends on.
+
+**How every task is done** (`CLAUDE.md`, "Developing a mod"):
+1. **Red:** write the listed tests first, and see them fail for the expected reason.
+2. **Green:** write the code that passes them.
+3. **Coverage:** `npm run coverage` passes, with at least 95% line and function coverage.
+4. **Verify:** `claude plugin validate`, then the typecheck. Then load the mod with `claude --plugin-dir ./taskmaster` and check it in a real terminal.
+
+Report the commands with their output. `main` is protected, so each task (or a small group of tasks) lands as its own PR, and the `mod-coverage` check must pass on each one.
+
+**Decisions taken** (defaults; change them here if the owner decides otherwise)
+- **Location:** the mod lives at `taskmaster/` in the repo root. The coverage gate treats any folder with `.claude-plugin/plugin.json` and `hooks/hooks.json` as a mod. It isn't exempt: it meets the 95% bar from its first PR.
+- **Scope:** Phase 1 covers the main loop only. These stay in Phase 2 (plan §9): G4, the Plan Gate, Drift, the advisory audit, model-based question detection, redirect handling, more than one enforced contract, the Pane, F8.5's auto-draft, F8.7 locking, `/taskmaster contract edit`, `resume --force` and `ref` mode.
+- **Spike lessons:** these apply from the first line (plan §9 and `CLAUDE.md`, "Mod API constraints"):
+  - one `Io` table of `$` closures, built at `session.start`, with earlier hooks buffering their data,
+  - literal `atom` keys,
+  - every `.taskmaster/` path anchored to `$.session.root()`,
+  - `isReadOnly` read from the real call's `tool.check`,
+  - a subagent's answer read from `turn.complete`.
+
+**Open questions for the owner** (neither blocks M0–M3)
+1. **Resume without the Plan Gate (P1.15).** F8.6 has the Plan Gate make a resumed run reload the skill, rebuild its tasks and read `HANDOFF.md` before any write. Phase 1 has no Plan Gate. Proposal: `/taskmaster resume` does the first two itself, and G3 blocks the stop until `HANDOFF.md` has been read.
+2. **Legitimate waits (P1.10).** Proposal: Phase 1 recognises a wait from `taskmaster_await_user`, or from a trailing "?" on the last message (F5's fast pre-check). The `$.model.classify` fallback arrives with Phase 2's question detection.
+3. **The spike after Gate A (P1.0b).** `CLAUDE.md` says to delete the spike and its coverage exemption once Gate A closes, but only after the first real mod lands. Should the spike be deleted, or kept for re-checking new builds? The exemption entry is in a protected file, so only the owner can remove it.
+
+## M0. Scaffold
+- [ ] P1.0 **Scaffold the mod** (F12, F14). Create `taskmaster/.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`, `types/` and `tests/`, with a test `engine()` helper like the spike's. Add the Phase 1 keys of `userConfig` (F12). At `session.start`, build the `Io` table and flush buffered early events. A startup self-check logs which events fired on this build (F14). **Red:** loading the mod registers `session.start`, and the self-check records the events it saw. The config defaults match F12. **Done:** coverage ≥ 95%, validate and typecheck pass, and the mod loads in a terminal with nothing visible.
+- [ ] P1.0b **Retire the spike** (owner decision, open question 3; only after P1.0 is merged). If the owner chooses deletion: the owner removes the `spike/taskmaster-spike` entry from `coverage-exempt.json`, then a PR deletes `spike/` and updates the paths in `CLAUDE.md` and `README.md`. The Gate A record already lives in plan §10.1.
+
+## M1. Contract compiler (F1)
+- [ ] P1.1 **Capture and attribute** (F1.1). On `skill.prompt`, capture the skill, its text, frontmatter, source, plugin name, path and a content hash. Attribute it to a loop: through the `Skill` tool's `tool.call.agentId`, through `agent.spawn` for preloaded skills, or to the main loop for a typed `/name` (spike: `skill-attribution`). **Red:** one test per attribution path. *Depends on P1.0.*
+- [ ] P1.2 **Deterministic parse** (F1.2). Name, description, and the `allowed-tools`, `context: fork` and `disable-model-invocation` frontmatter keys. Numbered or ordered lists, "Step N" headings, `- [ ]` checklists, MUST/NEVER/ALWAYS lines, and test, lint or build commands in code fences (candidate verify commands). **Red:** fixtures for a numbered workflow, a checklist skill, and a reference skill that yields no steps. *Depends on P1.1.*
+- [ ] P1.3 **Frontmatter and overrides** (F1.7, F1.9). Parse and schema-validate the `taskmaster:` block, and read `.taskmaster/overrides/<skill>.yaml`. Precedence is frontmatter, then override, then LLM, then heuristics (principle 1). **Red:** invalid frontmatter falls back with a logged reason, and an override beats extraction. *Depends on P1.2.*
+- [ ] P1.4 **Cached extraction and enforcement level** (F1.3, F1.4). One Haiku call returns JSON that is validated against a schema and cached in `$.store` by path + hash. If the call fails, the F1.2 result is used. The level is `enforce`, `advisory` or `none`: `none` for reference and persona skills and for `exemptSkills`. **Red:**
+  - a second load of the same hash makes no model call,
+  - a failed call yields the F1.2 result as `advisory`,
+  - high confidence that disagrees with the parse stays `advisory`.
+
+  *Depends on P1.3.*
+- [ ] P1.5 **Protocol footer and task seeding** (F1.5, F1.6). Append the footer (about 10 lines) with namespaced step ids (`skill:S#`) and the three tools. Seed one task per step with `$.tool.call(TaskCreate)` (spike: `seed-task`). **Red:** the footer lists every step id and the three tools, seeded tasks carry `[S#]`, and a `none` contract gets no footer. *Depends on P1.4. With P1.17, covers DoD 1.*
+
+## M2. Ledger and tools (F2, F3)
+- [ ] P1.6 **Ledger, task map and coverage map** (F2).
+  - For every `tool.call`: `agentId`, tool, a trimmed input digest, `isError`, a sequence number, files touched, and the Bash command line.
+  - The task map comes from `TaskCreate`, `TaskUpdate` and `TodoWrite` *results*.
+  - Each step has a coverage state: `uncovered`, `pending`, `in progress`, `satisfied`, `waived` or `needs re-verify`.
+  - Everything is kept in `$.state` and never rebuilt from `TaskList`.
+
+  **Red:** a scripted call sequence produces the expected coverage map, and the mod's own calls stay out of the ledger. *Depends on P1.5.*
+- [ ] P1.7 **The three tools** (F3). `taskmaster_waive`, `taskmaster_await_user` and `taskmaster_checkpoint`, each registered with `isDeferred: false`. At `strict`, a waiver needs the user's yes through `$.ui.ask`. **Red:** each tool updates the run state, and a strict-mode waiver without a yes is refused. *Depends on P1.6.*
+
+## M3. Gates (F4 G1–G3, F5, §6)
+- [ ] P1.8 **G1: completion gate** (F4, F8.4). Deny `TaskUpdate status=completed` when:
+  - no work was recorded between `in_progress` and `completed`,
+  - a verify spec isn't met after the last edit (matched on both the command and the error flag, so `echo PASS` doesn't count),
+  - completions arrive in a burst with no work between them,
+  - `metadata.handoff` is missing.
+
+  Every deny ends with the waive instruction. This is the only gate with a `.catch`, because it may fail closed. A `classic.TaskCompleted` block is the backstop (spike: `deny-complete`, `taskcompleted-block`). **Red:** one test per deny reason, plus `echo PASS`, plus a completion that passes. *Depends on P1.7. With P1.9, covers DoD 2.*
+- [ ] P1.9 **G2: delete gate** (F4). `TaskUpdate status=deleted` on a step's task is denied and redirected to `taskmaster_waive`. **Red:** deleting a task that isn't a step's is allowed. *Depends on P1.6.*
+- [ ] P1.10 **G3: Stop gate, with F5 safety and the freshness gate** (F4, F5, F8.4). Block the stop while this loop's steps are uncovered, pending or in progress. The reason lists the step ids and the three ways out: do the step, waive it, or call `await_user`.
+  - **Limits:** at most `maxStopBlocks` blocks per contract per user turn, and a new block only after the ledger has moved. After that, release the stop with `released: S3, S5 unverified` below the answer.
+  - **Never block** with background tasks or crons running, on a `stop_hook_active` re-entry, or after `isAborted`.
+  - **Waits pass:** `await_user` this turn, or a trailing "?" (open question 2).
+  - **Fails open** (spike: `stop-block`).
+  - **Freshness gate:** under the same cap, also block when there has been no checkpoint call since the last write call.
+
+  **Red:** a test per rule, including "no trapped session: the stop after the cap always passes" (Gate B safety: 0 trapped sessions). *Depends on P1.7. DoD 3.*
+- [ ] P1.11 **Strictness and the off switches** (§6, F9). `observe`, `advisory`, `enforce` and `strict` change what G1–G3 do: log, warn, deny/block, or strict mode's extras (a waiver needs the user's yes; the cap is 3 blocks). Esc (`isAborted`) freezes every gate for that turn, `/taskmaster off` always wins, and reference skills cause no blocks. **Red:** a table-driven test over §6's rows for G1–G3. *Depends on P1.8–P1.10. DoD 4.*
+
+## M4. Checkpoints and resume (F8.1–F8.6)
+- [ ] P1.12 **Store and contents** (F8.1, F8.2).
+  - **Files:** `.taskmaster/active.json`; `runs/<id>/checkpoint.json` (schema-versioned); `HANDOFF.md`; journal chunks in `journal-<n>.jsonl`.
+  - **Mirror:** a mirror and index in `$.store`.
+  - **Redaction:** secrets are redacted before every write.
+  - **Finding a run:** a run is found through `active.json`, never by session id. `/clear` changes the id, and a restart keeps it (plan §9).
+
+  **Red:** a checkpoint round-trips, a planted secret never reaches disk, and a shell `cd` doesn't move the writes. *Depends on P1.6.*
+- [ ] P1.13 **When to write, and git** (F8.3, F8.1).
+  - **When to write:** after every task transition, every `checkpointEveryWrites` write calls, at PreCompact, at every Stop, at `session.end` (the run is marked `paused` unless it's done), and at `contextCheckpointPercent`.
+  - **Milestone commits:** `git add -- .taskmaster/`, then `git commit --only -- .taskmaster/` (spike: `git-commit-only`), at most one commit per milestone. `checkpointPush: milestone` pushes them.
+  - **First-commit notice:** shown for a public or unknown remote, using `gh repo view` to find out which. The answer is stored per repository, and a headless run logs that the notice wasn't shown.
+
+  **Red:**
+  - the user's staged work stays staged,
+  - there's one commit per milestone,
+  - a private remote gets no notice, and a missing `gh` gives "may be public".
+
+  *Depends on P1.12. DoD 7.*
+- [ ] P1.14 **Compaction** (F8.5, without the auto-draft).
+  - **At the context threshold:** add a hidden row asking for `taskmaster_checkpoint`.
+  - **Before compaction:** write the checkpoint at PreCompact, before `session.compact`'s `next()`.
+  - **Compaction instructions:** add the "preserve the run id, step ids, current step and `HANDOFF.md` path" line to `session.compact`'s `instructions`.
+  - **At `SessionStart(compact)`:** send the contract, coverage and next action as `additionalContext`.
+
+  **Red:** a test driven by the spike's observed event order (`session.compact` → PreCompact → SessionStart(compact) → PostCompact). *Depends on P1.13. DoD 5.*
+- [ ] P1.15 **Cold-start resume** (F8.6, with §9's restart finding).
+  - **When to check:** at `SessionStart(startup|clear)` *and* at `session.start`, without offering the same run twice.
+  - **How it's offered:** a briefing as `additionalContext`, plus a band entry; `resumePolicy` applies.
+  - **`/taskmaster resume`:**
+    - it reloads the skill, asking through `$.ui.ask` if the hash changed,
+    - it seeds the tasks from the checkpoint,
+    - `HANDOFF.md` must be read before the stop goes through (open question 1).
+  - **Staleness:** the git anchor and file hashes mark changed steps `needs re-verify`.
+  - **`source: resume`:** gets only a light reminder.
+
+  **Red:**
+  - a restart that fires only `session.start` still offers the run,
+  - running the check twice offers the run once,
+  - a changed file drops its step to `needs re-verify`.
+
+  *Depends on P1.12. DoD 6.*
+
+## M5. Control and visibility (F9, F11)
+- [ ] P1.16 **`/taskmaster` command** (F9). Status, `off | advisory | enforce | strict`, `waive <step> <reason>`, `contract show <skill>`, `checkpoint`, `runs`, `resume [run]`, `abandon [run]`, `report` and `exempt <skill>`. **Red:** a test of each subcommand's effect on state. *Depends on P1.11 and P1.15.*
+- [ ] P1.17 **Status line, band, toasts, and the summary below the answer** (F11).
+  - **Status line:** `skill · 3/7 · 1 waived`.
+  - **Toasts:** shown on blocks.
+  - **Below each final answer:** under an active contract, the steps satisfied, waived and released.
+
+  **Red:** UI mounted on `surface: 'terminal'`, with the test body looped over `['terminal', 'desktop']` (`CLAUDE.md`). *Depends on P1.10. DoD 1.*
+
+## M6. Metrics and experiments (F13.1–F13.4, plus F13.6 export)
+- [ ] P1.18 **Event log, run summary and export** (F13.1, F13.2, F13.6).
+  - **Events:** schema-versioned, with the common fields (including `arm` and `contract_source`) and every listed event type.
+  - **Privacy:** commands are stored as the normalized program plus a hash of the arguments, paths are hashed, and everything is redacted.
+  - **`runs.jsonl`:** silent skips, effective and friction blocks, saves, overhead and outcome.
+  - **Commands:** `/taskmaster metrics`, and `metrics export` (JSONL + CSV + a data dictionary).
+
+  **Red:** every gate decision emits a schema-valid event, and no event holds raw prompt, code or file text. *Depends on P1.11. DoD 8.*
+- [ ] P1.19 **Ratings and implicit signals** (F13.3). The band offers ratings to a `ratingSample` of runs, at most once an hour, as one click that can be dismissed. Interventions are logged as implicit signals. **Red:** a test of the sampling and the hourly cap. *Depends on P1.18.*
+- [ ] P1.20 **Experiment arms** (F13.4).
+  - `baseline`: metrics and checkpoints only, with no footer and no gates.
+  - `generic`: enforcement with the skill's frontmatter ignored.
+  - `frontmatter`: only for skills that have frontmatter.
+  - **Assignment:** the arm is a deterministic hash of `run_id` against `experimentWeights`, and is recorded on every event.
+  - **Options:** `experimentBlind` hides the arm label, and `experiment: off` is the default.
+
+  **Red:** assignment is deterministic, and `baseline` never adds a footer or denies. *Depends on P1.18.*
+
+## M7. Canaries (F15.1, F15.2 manual, F15.5)
+- [ ] P1.21 **Tripwires and incidents** (F15.1). Each friction, miss and contract-health trip writes an incident with a slice of the journal around it. **Red:** one test per tripwire. *Depends on P1.18.*
+- [ ] P1.22 **Session circuit breaker** (F15.5). Three user friction signals in one session drop the mod to advisory for the rest of it. It says so once and files an incident. Claude's own waivers never count. **Red:** five waivers by Claude don't trip it, and three overrides by the user do. *Depends on P1.21.*
+- [ ] P1.23 **`/taskmaster retro`, manual RCA** (F15.2).
+  - **Queue:** incidents queue in `.taskmaster/rca/queue/`.
+  - **One model call per incident:** a `$.model.complete` call on `rcaModel`, capped by `rcaDailyCap`, with schema-validated output.
+  - **Rules:** a "why" with no cited journal events is dropped. Categories come from the fixed taxonomy. After 3 RCAs with the same signature, the next ones are only counted.
+
+  **Red:**
+  - an uncited "why" is dropped,
+  - a 4th incident with the same signature is only counted,
+  - the daily cap holds.
+
+  *Depends on P1.21. DoD 9.*
+
+## M8. Frontmatter advisor, single skill (F16.1–F16.4, F16.6–F16.8; built last, because Phase 1.5 uses it)
+- [ ] P1.24 **The skill, command and tools** (F16.1–F16.3).
+  - **The skill:** ship `skills/frontmatter/` (`taskmaster:frontmatter`) with its own `taskmaster:` frontmatter (spike: `plugin-skills-folder`).
+  - **The command:** `/taskmaster frontmatter suggest|apply|check`.
+  - **Finding a target:** from the skills the mod has seen load, a `$.fs.list` scan of the standard folders, or an explicit path.
+  - **The tools:** `taskmaster_frontmatter_draft`, `_validate` and `_apply`. The mod writes overrides itself, and returns file edits for Claude to make with `Edit`.
+
+  **Red:** the draft returns the compiler's draft and the repo's verify commands, and applying as `override` leaves the skill file byte-for-byte unchanged. *Depends on P1.4 and P1.18.*
+- [ ] P1.25 **Workflow, lint, post-check and provenance** (F16.4, F16.6–F16.8).
+  - **Lint:** schema, grounding, runnable verify specs, and reasonableness.
+  - **Post-check:** only the `taskmaster:` key may change.
+  - **Target:** chosen by the skill's source, using F16.6's table.
+  - **Provenance:** the provenance keys and events are recorded, and the user's edits to a suggestion are logged as extraction incidents.
+
+  **Red:** a change to the skill body is caught by the post-check, and a step that isn't in the skill text fails grounding. *Depends on P1.24. DoD 10.*
+
+## M9. Phase 1 exit
+- [ ] P1.26 **Definition of done, checked live** (§11). Walk through items 1–10 in a real terminal session, including the forced-`/compact` test (DoD 5) and the `/clear` cold-start test (DoD 6), and record the results here. Then Phase 1.5 begins (plan §9). *Depends on all of the above.*

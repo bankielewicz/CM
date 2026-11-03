@@ -46,7 +46,7 @@ This is the durable copy of the Gate A close-out task list. Claude's built-in ta
   - **For G4 (3.3):** two mechanisms, one per path. Hold plain-answer subagents with the SubagentStop block (works). Hold handback subagents with a `SubagentHandback` deny: that holds them, but the subagent retried without acting on the deny (2.3c). Bypass stays untested. [#13]
 - [x] 3.2 `/tm-spike report`: every row is answered, and the verdict is read against §10.1. **GO**, with 18/18 answered and all three blocking checks passed. [#14]
 - [x] 3.3 Record Gate A in `docs/taskmaster-plan.md` §10.1: the verdict, the date, the build, the fallbacks switched on, and the findings table (`.taskmaster/spike/` is gitignored). Settle G4's mechanism from `subagent-stop-block` (auto and bypass) and `deny-handback`. Tick this file, then commit and push. **Done:** §10.1 has the result, the fallbacks and the G4 table. §9 has corrections to three earlier claims plus the session-start finding. RUNBOOK §2 and §5 have the mode notes. [#15]
-- [ ] 3.4 Split the Phase 1 MVP (plan §9) into tasks [#16]
+- [x] 3.4 Split the Phase 1 MVP (plan §9) into tasks. **Done:** `docs/phase-1-tasks.md` has 28 test-first tasks in 10 milestones (M0–M9), each mapped to the plan's features and §11's definition of done, plus three open questions for the owner. [#16]
 
 ## Observed along the way
 - **The task list is kept per session id.** The container restarted and resumed the first session (`9ea42fa8`). Its built-in list came back (the old probe tasks #4–#6), while the list made in `119c2caf` (the session after `/clear`) wasn't visible. Step 2.6 records what `/clear` does in the spike's own evidence.
