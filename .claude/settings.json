@@ -1,4 +1,18 @@
 {
+  "permissions": {
+    "deny": [
+      "Edit(/coverage-exempt.json)",
+      "Edit(/package.json)",
+      "Edit(/package-lock.json)",
+      "Edit(/npm-shrinkwrap.json)",
+      "Edit(/.npmrc)",
+      "Edit(/.claude/settings.json)",
+      "Edit(/.claude/settings.local.json)",
+      "Edit(/scripts/**)",
+      "Edit(/.github/workflows/**)",
+      "Bash(gh pr merge *)"
+    ]
+  },
   "hooks": {
     "Stop": [
       {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Line coverage for Claude Code mods, measured under the real test kit.
+// Line and function coverage for Claude Code mods, measured under the real test kit.
 //
 // `claude plugin test` has no coverage option and ignores flags it doesn't know,
 // so this instruments a temporary copy of each mod and runs the kit on the copy:
@@ -9,6 +9,9 @@
 // - Each test is wrapped to ask for those counters and print them when it ends.
 // - The engine's scan has to read `atom(...)` declarations, so they stay
 //   uninstrumented and out of the count.
+//
+// Known limit: the counters come from what tests print, so a test written to print
+// fake ones would pass. That takes deliberate cheating, and it shows in review.
 //
 // Exits 1 if any mod is under THRESHOLD, if its tests fail, or if there is
 // nothing to measure. A mod listed in coverage-exempt.json, with a reason, is
@@ -32,7 +35,7 @@ import { findMods } from './find-mods.mjs'
 
 export { findMods }
 
-/** The minimum line coverage, the same number as the GitHub ruleset's. */
+/** The minimum line and function coverage. The GitHub ruleset holds the same number, for lines. */
 export const THRESHOLD = 95
 
 const DUMP_COMMAND = '__mod_coverage__'
@@ -41,10 +44,12 @@ const CLOSE = '__MOD_COV_END__'
 const ENTRY = '__mod_coverage_entry.ts'
 const EXEMPT_FILE = 'coverage-exempt.json'
 const REPORT = 'cobertura-coverage.xml'
-const SOURCE = /\.(ts|tsx|js|jsx)$/
-const NOT_CODE = /(\.d\.ts|\.test\.tsx?)$/
+const SOURCE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/
+const NOT_CODE = /(\.d\.[cm]?ts|\.test\.[cm]?[jt]sx?)$/
 const TEST = /\.test\.tsx?$/
 const SKIPPED_DIRS = new Set(['.claude', '.git', 'node_modules'])
+// Top-level folders of a mod that hold no mod code. Everything else is measured.
+const UNMEASURED_DIRS = new Set(['tests', '.claude-plugin'])
 
 // Takes only the counters: the maps are known from instrumenting.
 const COUNTERS = `(cov: any) => Object.fromEntries(Object.entries(cov ?? {}).map(([path, c]: any) => [path, { s: c.s, f: c.f, b: c.b }]))`
@@ -122,7 +127,7 @@ const test: any = (name: string, ...rest: any[]) => {
 }
 
 function entryModule(moduleFile) {
-  const inner = moduleFile.replace(SOURCE, '')
+  const inner = moduleFile.replace(/\.(ts|tsx|js|jsx)$/, '')
   return `import { register as inner } from '${inner}'
 
 export const register = (on: any, options: any) => {
@@ -163,11 +168,17 @@ export function mergeDumps(seed, output) {
   return { map, dumps }
 }
 
-/** Whether a summary clears the bar. Uses the counts, so rounding can't lift 94.996 to 95. */
+// Uses the counts, so rounding can't lift 94.996 to 95.
+const underBar = ({ total, covered }) => covered * 100 < THRESHOLD * total
+
+/**
+ * Whether a summary clears the bar on both lines and functions. Lines alone aren't enough:
+ * loading a file runs every line of its one-line functions, even if nothing calls them.
+ */
 export function verdict(summary) {
-  const { total, covered } = summary.lines
-  if (total === 0) return { ok: false, reason: 'no lines to measure' }
-  if (covered * 100 < THRESHOLD * total) return { ok: false, reason: `below ${THRESHOLD}%` }
+  if (summary.lines.total === 0) return { ok: false, reason: 'no lines to measure' }
+  const missed = [underBar(summary.lines) && 'line', underBar(summary.functions) && 'function'].filter(Boolean)
+  if (missed.length > 0) return { ok: false, reason: `${missed.join(' and ')} coverage below ${THRESHOLD}%` }
   return { ok: true, reason: '' }
 }
 
@@ -198,6 +209,14 @@ function walk(dir) {
   })
 }
 
+/** A mod's source files, whether or not anything loads them. */
+function modSource(copy) {
+  return walk(copy).filter(file => {
+    const [top] = relative(copy, file).split(sep)
+    return SOURCE.test(file) && !NOT_CODE.test(file) && !UNMEASURED_DIRS.has(top)
+  })
+}
+
 function measureMod(mod, root) {
   const absolute = resolve(root, mod)
   const work = mkdtempSync(join(tmpdir(), 'mod-coverage-'))
@@ -213,8 +232,7 @@ function measureMod(mod, root) {
     if (modules?.length !== 1) throw new Error(`hooks.json must name one module, found ${modules?.length ?? 0}`)
 
     const seed = {}
-    for (const file of walk(hooksDir)) {
-      if (!SOURCE.test(file) || NOT_CODE.test(file)) continue
+    for (const file of modSource(copy)) {
       const key = relative(root, join(absolute, relative(copy, file)))
       const { code, coverage } = instrumentSource(readFileSync(file, 'utf8'), key)
       writeFileSync(file, code)
@@ -263,9 +281,9 @@ function printMod(mod, result, exemptReason) {
   const ok = testsPassed && (Boolean(exemptReason) || check.ok)
   const problems = [exemptReason ? '' : check.reason, testsPassed ? '' : 'tests failed'].filter(Boolean).join('; ')
   const label = !ok ? 'FAIL' : exemptReason ? 'EXEMPT' : 'PASS'
-  const counts = `${summary.lines.covered}/${summary.lines.total} lines`
+  const measured = ({ pct, covered, total }, noun) => `${pct}% (${covered}/${total} ${noun})`
   const note = problems ? `, ${problems}` : exemptReason ? `; ${exemptReason}` : ''
-  console.log(`${label} ${mod}: ${summary.lines.pct}% (${counts})${note}`)
+  console.log(`${label} ${mod}: ${measured(summary.lines, 'lines')}, ${measured(summary.functions, 'functions')}${note}`)
   for (const failure of failures) console.log(`  ${failure}`)
   for (const file of map.files()) {
     const coverage = map.fileCoverageFor(file)
@@ -322,7 +340,7 @@ function main(argv) {
   if (summaries.length > 0) writeCobertura(combined, out, root)
   else console.log('No coverage report: every mod measured here is exempt.')
 
-  if (!allOk) console.log(`Every mod needs passing tests and, unless exempt, at least ${THRESHOLD}% line coverage.`)
+  if (!allOk) console.log(`Every mod needs passing tests and, unless exempt, at least ${THRESHOLD}% line and function coverage.`)
   return allOk ? 0 : 1
 }
 

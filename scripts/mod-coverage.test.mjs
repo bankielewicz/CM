@@ -75,13 +75,33 @@ test('the bar is the 95 in the GitHub rule', () => {
   assert.equal(THRESHOLD, 95)
 })
 
+const ALL_FUNCTIONS = { total: 20, covered: 20 }
+const ALL_LINES = { total: 100, covered: 100 }
+
 test('verdict passes exactly at the bar and fails just under it', () => {
-  assert.equal(verdict({ lines: { total: 100, covered: 95, pct: 95 } }).ok, true)
-  assert.equal(verdict({ lines: { total: 10000, covered: 9499, pct: 94.99 } }).ok, false)
+  assert.equal(verdict({ lines: { total: 100, covered: 95, pct: 95 }, functions: ALL_FUNCTIONS }).ok, true)
+  assert.equal(verdict({ lines: { total: 10000, covered: 9499, pct: 94.99 }, functions: ALL_FUNCTIONS }).ok, false)
+})
+
+test('verdict holds functions to the same bar as lines', () => {
+  assert.equal(verdict({ lines: ALL_LINES, functions: { total: 20, covered: 19 } }).ok, true)
+  const low = verdict({ lines: ALL_LINES, functions: { total: 10000, covered: 9499 } })
+  assert.equal(low.ok, false)
+  assert.match(low.reason, /function coverage below 95/)
+})
+
+test('verdict names both when lines and functions are under the bar', () => {
+  const low = verdict({ lines: { total: 100, covered: 50 }, functions: { total: 20, covered: 10 } })
+  assert.equal(low.ok, false)
+  assert.match(low.reason, /line and function coverage below 95/)
+})
+
+test('a mod with no functions is judged on its lines', () => {
+  assert.equal(verdict({ lines: ALL_LINES, functions: { total: 0, covered: 0 } }).ok, true)
 })
 
 test('verdict fails when there are no lines to measure, rather than passing on nothing', () => {
-  const v = verdict({ lines: { total: 0, covered: 0, pct: 100 } })
+  const v = verdict({ lines: { total: 0, covered: 0, pct: 100 }, functions: { total: 0, covered: 0 } })
   assert.equal(v.ok, false)
   assert.match(v.reason, /no lines/i)
 })
@@ -229,6 +249,75 @@ test('a hook file no test imports pulls the mod below the bar', () => {
   const { status, out } = runCli(root, '--out', join(root, 'cov'), dir)
   assert.equal(status, 1, out)
   assert.match(out, /unused\.ts/)
+})
+
+// Each body is on its own line, so importing a file doesn't count as covering it.
+const PADDING = Array.from({ length: 40 }, (_, i) => `export const v${i} = (x: number) => {\n  return x + ${i}\n}\n`).join('')
+
+test('code outside hooks/ counts when a hook imports it', () => {
+  const root = scratch()
+  const dir = mod(root, 'm', KIT + CALL_WRITE + CALL_READ, {
+    'lib/logic.ts': PADDING,
+    'hooks/register.ts': `import { v0 } from '../lib/logic'
+export const first = v0(1)
+export const register = (on: any) => {
+  on('tool.call', (_: any, e: any, next: any) => {
+    if (e.tool === 'Write') {
+      return { deny: 'no writes' }
+    }
+    return next(e)
+  })
+}
+`,
+  })
+  const { status, out } = runCli(root, '--out', join(root, 'cov'), dir)
+  assert.equal(status, 1, out)
+  assert.match(out, /lib\/logic\.ts/)
+})
+
+test('uncalled one-line functions fail the gate, though loading their file reaches every line', () => {
+  const root = scratch()
+  const oneLiners = `${Array.from({ length: 40 }, (_, i) => `export const v${i} = () => ${i}`).join('\n')}\n`
+  const dir = mod(root, 'm', KIT + CALL_WRITE + CALL_READ, {
+    'lib/logic.ts': oneLiners,
+    'hooks/register.ts': `import { v0 } from '../lib/logic'
+export const first = v0()
+export const register = (on: any) => {
+  on('tool.call', (_: any, e: any, next: any) => {
+    if (e.tool === 'Write') {
+      return { deny: 'no writes' }
+    }
+    return next(e)
+  })
+}
+`,
+  })
+  const { status, out } = runCli(root, '--out', join(root, 'cov'), dir)
+  assert.equal(status, 1, out)
+  assert.match(out, /function coverage below 95/)
+  assert.match(out, /\d+\/\d+ functions/)
+})
+
+test('every JavaScript and TypeScript file in a mod counts, whatever its extension or folder', () => {
+  const root = scratch()
+  const files = ['hooks/helper.mjs', 'lib/other.cjs', 'lib/typed.mts', 'lib/typed.cts', 'types/logic.ts']
+  const dir = mod(root, 'm', KIT + CALL_WRITE + CALL_READ, Object.fromEntries(files.map(file => [file, PADDING])))
+  const { status, out } = runCli(root, '--out', join(root, 'cov'), dir)
+  assert.equal(status, 1, out)
+  for (const file of files) assert.match(out, new RegExp(file.replace('.', '\\.')))
+})
+
+test('tests and their helpers, type declarations and the manifest folder do not count', () => {
+  const root = scratch()
+  const dir = mod(root, 'm', KIT + CALL_WRITE + CALL_READ, {
+    'tests/helper.ts': PADDING,
+    'types/index.d.ts': 'export type T = string\n',
+    '.claude-plugin/extra.ts': PADDING,
+    'skills/s/SKILL.md': '# A skill\n',
+  })
+  const { status, out } = runCli(root, '--out', join(root, 'cov'), dir)
+  assert.equal(status, 0, out)
+  assert.doesNotMatch(out, /helper\.ts|index\.d\.ts|extra\.ts|SKILL\.md/)
 })
 
 test('a failing test fails the gate even with full coverage', () => {

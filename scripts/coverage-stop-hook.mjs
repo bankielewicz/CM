@@ -2,8 +2,8 @@
 // Claude Code Stop hook: Claude can't finish a turn with changed mod code that
 // is under the coverage bar. Exit 2 sends the reason on stderr back to Claude.
 //
-// It measures only mods whose hooks/ or tests/ differ from what's pushed, so
-// turns that don't touch mod code stay fast and aren't blocked. CI measures all.
+// It measures only mods whose code or tests differ from what's pushed, so turns
+// that don't touch mod code stay fast and aren't blocked. CI measures all.
 
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
@@ -13,7 +13,11 @@ import { findMods } from './find-mods.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-const isModCode = (path, mod) => path.startsWith(`${mod}/hooks/`) || path.startsWith(`${mod}/tests/`)
+const SOURCE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/
+
+const isModCode = (path, mod) =>
+  path.startsWith(`${mod}/`) &&
+  (SOURCE.test(path) || path.startsWith(`${mod}/hooks/`) || path.startsWith(`${mod}/tests/`))
 
 /** Whether any of the paths is code or tests of one of the mods. */
 export function touchesModCode(paths, mods) {

@@ -14,11 +14,15 @@ test('code and tests of a mod count as a change', () => {
   const mods = ['spike/taskmaster-spike']
   assert.equal(touchesModCode(['spike/taskmaster-spike/hooks/register.tsx'], mods), true)
   assert.equal(touchesModCode(['spike/taskmaster-spike/tests/spike.test.ts'], mods), true)
+  assert.equal(touchesModCode(['spike/taskmaster-spike/hooks/hooks.json'], mods), true)
+  assert.equal(touchesModCode(['spike/taskmaster-spike/lib/logic.ts'], mods), true)
+  assert.equal(touchesModCode(['spike/taskmaster-spike/helper.mjs'], mods), true)
 })
 
 test('a mod\'s notes and other folders do not', () => {
   const mods = ['spike/taskmaster-spike']
   assert.equal(touchesModCode(['spike/taskmaster-spike/GATE-A-TASKS.md'], mods), false)
+  assert.equal(touchesModCode(['spike/taskmaster-spike/skills/spike-probe/SKILL.md'], mods), false)
   assert.equal(touchesModCode(['docs/taskmaster-plan.md', 'CLAUDE.md'], mods), false)
   assert.equal(touchesModCode(['spike/taskmaster-spike-old/hooks/a.ts'], mods), false)
 })

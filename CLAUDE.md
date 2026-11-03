@@ -12,7 +12,7 @@ Run from the repo root. The `claude` CLI loads, validates and tests a mod. npm h
 
 ```sh
 claude plugin test spike/taskmaster-spike         # one mod's tests, about 1 s
-npm run coverage                                  # every mod; exits 1 under 95% line coverage. Also takes mod folders
+npm run coverage                                  # every mod; exits 1 under 95% line or function coverage. Also takes mod folders
 npm test                                          # the coverage gate's own tests
 claude plugin validate spike/taskmaster-spike     # README-install and plugin-directory advice is expected
 npx -y -p typescript@5.6 tsc -p spike/taskmaster-spike   # needs the engine-written types (see below)
@@ -28,7 +28,7 @@ Work test-first, in this order, and report the commands you ran with their outpu
 
 1. **Red:** write a test for the expected behaviour and run it. It must fail, for the reason you expected, before the implementation exists. A bug fix starts as a test that reproduces the bug.
 2. **Green:** write the code that passes it. Don't weaken, delete or rewrite a test to get there, and don't hard-code what it expects.
-3. **Coverage:** `npm run coverage` must pass, with at least 95% line coverage per mod.
+3. **Coverage:** `npm run coverage` must pass, with at least 95% line and function coverage per mod.
 4. **Verify:** run `claude plugin validate` and the typecheck, then load the mod with `claude --plugin-dir` and check it in a real terminal. The kit exercises hooks and what they return, not how anything is painted. `claude --debug` logs every hook that failed.
 
 Writing tests with the kit:
@@ -39,11 +39,13 @@ Writing tests with the kit:
 
 How the bar is enforced:
 
-- `scripts/mod-coverage.mjs` measures under the real kit by instrumenting a temporary copy, because `claude plugin test` has no coverage option and silently ignores flags it doesn't know. Hook files no test loads count as 0%, and `istanbul ignore` comments have no effect.
-- A Stop hook (`.claude/settings.json`, `scripts/coverage-stop-hook.mjs`) blocks the end of a turn when a mod's `hooks/` or `tests/` differ from what's pushed and that mod is under the bar.
+- `scripts/mod-coverage.mjs` measures under the real kit by instrumenting a temporary copy, because `claude plugin test` has no coverage option and silently ignores flags it doesn't know. Every source file in a mod counts, whether or not a test loads it, except test files and helpers in `tests/`, type declarations and `.claude-plugin/`. `istanbul ignore` comments have no effect. The counters come from what tests print, so a test written to print fake ones would pass: never write one, and look for that when reviewing tests.
+- A Stop hook (`.claude/settings.json`, `scripts/coverage-stop-hook.mjs`) blocks the end of a turn when a mod's code or tests differ from what's pushed and that mod is under the bar.
 - `.github/workflows/mod-coverage.yml` runs the gate on every PR and uploads Cobertura for the ruleset's "Restrict code coverage" rule. Its `mod-coverage` job is a required check, so keep that job name and don't give the workflow a `paths:` filter: a required check that gets filtered out never reports.
 - `coverage-exempt.json` excuses a mod from the percentage, with a reason. It's still measured and printed, failing tests still fail it, and it stays out of the uploaded report. Only the owner decides an exemption. With every mod exempt, as now, the gate writes no report and the upload is skipped. The coverage rule didn't block PR #1 without one, so the `mod-coverage` check is what enforces the bar.
-- The 95 lives in `THRESHOLD` in `scripts/mod-coverage.mjs` and in the GitHub ruleset, so change them together. If the bar can't be met, ask; don't lower it or exclude files.
+- `gate-guard` (`.github/workflows/gate-guard.yml`, `scripts/gate-guard.mjs`) fails any PR that changes the gate's own files, dependency updates included. It runs from the base branch through `pull_request_target`, so it must never check out or run PR code. To change one of those files, the owner lifts the check in the ruleset.
+- `.claude/settings.json` denies Claude edits to the same files and `gh pr merge`, and a test keeps its list in step with `PROTECTED` in `scripts/gate-guard.mjs`. If one of those files needs changing, give the owner the exact edit; don't look for another way to write it.
+- The 95 lives in `THRESHOLD` in `scripts/mod-coverage.mjs` and in the GitHub ruleset, so change them together. The ruleset reads lines only, so only the `mod-coverage` check holds functions to it. Line coverage alone isn't enough, because loading a file runs every line of its one-line functions. Branch coverage is printed but not required. If the bar can't be met, ask; don't lower it or exclude files.
 
 ## Spike architecture
 

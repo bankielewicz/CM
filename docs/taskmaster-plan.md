@@ -295,7 +295,7 @@ A third-party mod can't send events to Anthropic's telemetry or to the user's Op
 - A small offline analysis script, outside the mod (DuckDB or pandas), computes the go/no-go table (§10) per arm and per `contract_source`, with bootstrap 95% confidence intervals.
 
 ### F14. Quality and packaging
-- `claude plugin validate` and `tsc -p` on every change. A `claude plugin test` suite for each gate, plus a compaction test and a cold-start test. Written test-first, with `npm run coverage` holding the mod to at least 95% line coverage (see `CLAUDE.md`).
+- `claude plugin validate` and `tsc -p` on every change. A `claude plugin test` suite for each gate, plus a compaction test and a cold-start test. Written test-first, with `npm run coverage` holding the mod to at least 95% line and function coverage (see `CLAUDE.md`).
 - A startup self-check logs which events fired on this build, because the API is early access and changes between releases.
 - Install with `/plugin install taskmaster --marketplace <owner>/<repo>`.
 
