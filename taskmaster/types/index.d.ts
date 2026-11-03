@@ -65,6 +65,7 @@ export type SelfCheckRecord = {
  */
 export type Io = {
   now: () => Promise<number>
+  version: () => Promise<string>
   storeGet: (key: string) => Promise<unknown>
   storeSet: (key: string, value: unknown) => Promise<void>
 }

@@ -7,7 +7,7 @@ import type { Register } from 'claude-code'
 
 import type { Io, WatchedEvent } from '../types'
 import { parseConfig } from './config'
-import { SelfCheck, UNKNOWN_BUILD } from './selfcheck'
+import { SelfCheck } from './selfcheck'
 
 export const register: Register = (on, options) => {
   // Module state starts over on a hot reload. The self-check's record is in
@@ -22,19 +22,14 @@ export const register: Register = (on, options) => {
     // A mod can't pass `$` around, so helpers get this table of closures.
     const io: Io = {
       now: () => $.clock.now(),
+      version: async () => (await $.session.version()).version,
       storeGet: key => $.store.get(key),
       storeSet: (key, value) => $.store.set(key, value),
     }
     const result = await next(e)
     selfCheck.note('session.start')
-    let build = UNKNOWN_BUILD
-    try {
-      build = (await $.session.version()).version
-    } catch {
-      // The record is kept under "unknown" until the engine can say.
-    }
     // Saves start here, beginning with the events noted before this point.
-    selfCheck.start(io, build, config)
+    selfCheck.start(io, config)
     return result
   })
 

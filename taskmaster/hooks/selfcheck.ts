@@ -48,7 +48,7 @@ export function storedEvents(value: unknown, build: string): WatchedEvent[] {
   return record.seen.filter(isWatched)
 }
 
-type Started = { io: Io; build: string; config: Config }
+type Started = { io: Io; build: Promise<string>; config: Config }
 
 export class SelfCheck {
   private readonly seen = new Set<WatchedEvent>()
@@ -66,8 +66,9 @@ export class SelfCheck {
   }
 
   /** At session.start: from here on events are saved, starting with the ones noted before it. */
-  start(io: Io, build: string, config: Config): void {
-    this.started = { io, build, config }
+  start(io: Io, config: Config): void {
+    // One lookup per session.start, so every save from it uses one key.
+    this.started = { io, build: io.version().catch(() => UNKNOWN_BUILD), config }
     this.queue()
   }
 
@@ -89,7 +90,8 @@ export class SelfCheck {
     })()
   }
 
-  private async save({ io, build, config }: Started): Promise<void> {
+  private async save({ io, build: lookup, config }: Started): Promise<void> {
+    const build = await lookup
     const key = selfCheckKey(build)
     let stored: unknown
     try {
