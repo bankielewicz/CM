@@ -1,6 +1,6 @@
 # Taskmaster: a universal adherence guardrail mod for Claude Code
 
-Status: design plan, revised after advisor review and user review (no code yet) · Target: Claude Code function-hooks mod API (early access; checked against build 2.1.317's `claude-code.d.ts`)
+Status: design plan, revised after the advisor review and three user reviews (no code yet) · Target: Claude Code function-hooks mod API (early access; checked against build 2.1.317's `claude-code.d.ts`)
 
 ## 1. Short answer
 
@@ -119,6 +119,8 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
   ```
 - **F1.8 Per-skill user override (for third-party skills):** the first time a skill runs, the Pane shows the extracted contract. `/taskmaster contract edit <skill>` lets the user fix it and saves it to `$.store`. That contract is then `enforce` for that skill version.
 
+- **F1.9 Override storage:** `.taskmaster/overrides/<skill>.yaml` in the project, committed with the checkpoints so the team shares it, mirrored in `$.store`. F16 is the guided way to create one.
+
 ### F2. Ledger: the mod's own record (source of truth)
 - **F2.1** For each `tool.call` on any loop: `agentId`, tool, a trimmed input digest, `isError`, a sequence number, files touched, and the Bash command line.
 - **F2.2 Task map** built from `TaskCreate` / `TaskUpdate` / `TodoWrite` *results*: task id → `[S#]` step, status history, owner (the loop that created it), and the ledger sequence numbers between `in_progress` and `completed`.
@@ -218,6 +220,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
 
 ### F9. Human control
 - `/taskmaster` (status) · `off | advisory | enforce | strict` · `waive <step> <reason>` · `contract show|edit <skill>` · `checkpoint` · `runs` · `resume [run] [--force]` · `abandon [run]` · `report` · `exempt <skill>`.
+- `/taskmaster frontmatter suggest|apply|check|list` (F16).
 - Esc (`isAborted`) freezes every gate for that turn.
 
 ### F10. Multiple skills, subagents, teammates
@@ -236,13 +239,14 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
 - `metrics` (on), `metricsDir` (`.taskmaster/metrics`), `ratingSample` (1 in 3 runs, at most once per hour), `sentimentClassifier` (off; opt-in, because it reads the user's next prompt), `metricsWebhook` (off; optional `$.http.fetch` sink)
 - `experiment` (`off` | `on`), `experimentWeights` (`baseline` / `generic` / `frontmatter`), `experimentBlind` (hide the arm label so ratings aren't biased)
 - `rca` (`manual` | `auto` | `off`), `rcaModel`, `rcaDailyCap` (5), `circuitBreakerThreshold` (3 user friction signals per session)
+- `frontmatterNudges` (on), `overrideDir` (`.taskmaster/overrides`)
 
 ### F13. Metrics and experiments: quantify results and user experience
 
 A third-party mod can't send events to Anthropic's telemetry or to the user's OpenTelemetry collector; in this build both are reserved for the engine and built-in plugins. So the mod **owns its metrics files**. They live in the project next to the checkpoints, are committed with them (so they survive cloud containers and can be mined across clones), and are mirrored in `$.store`.
 
 **F13.1 Event log:** `.taskmaster/metrics/events-<date>-<n>.jsonl`, schema-versioned.
-- *Common fields:* `schema`, `mod_version`, the engine build (`$.session.version()`), `session_id`, `run_id`, `agent` (main or subagent), `skill_id` (name + hash), `skill_source`, **`contract_source`** (`frontmatter` | `override` | `llm` | `heuristic` | `none`), `contract_confidence`, `strictness`, **`arm`**, and `ts`.
+- *Common fields:* `schema`, `mod_version`, the engine build (`$.session.version()`), `session_id`, `run_id`, `agent` (main or subagent), `skill_id` (name + hash), `skill_source`, **`contract_source`** (`frontmatter-authored` | `frontmatter-suggested` | `override-authored` | `override-suggested` | `llm` | `heuristic` | `none`; F16 records which ones it produced), `contract_confidence`, `strictness`, **`arm`**, and `ts`.
 - *Event types:*
   - contract built (kind, step count, confidence, extraction latency and tokens),
   - task transition,
@@ -362,6 +366,107 @@ The idea is sound, but **the loop must never let the mod loosen itself.** The ch
 
 If RCAs are mostly `unclear` or get rejected, scale the generator back to `manual`.
 
+### F16. Frontmatter advisor: recommend `taskmaster:` frontmatter, then add it to this or any other skill
+
+A user asks Claude to read a skill and recommend Taskmaster frontmatter for it. Claude drafts it with the mod's help, the user reviews it, and then chooses where it goes: that skill, a new skill, other skills, or an override file that leaves the skill untouched. This is also how the Phase 1.5 evaluation gets its frontmatter.
+
+**F16.1 Entry points**
+- **Plain request:** "recommend taskmaster frontmatter for the deploy skill." The plugin ships a skill, `taskmaster:frontmatter`, in its `skills/` folder. Its description triggers on requests like this, and it runs the workflow below. The skill carries its own `taskmaster:` frontmatter, so the mod enforces its own workflow. (The spike checks that a `skills/` folder loads beside the hooks module; the slash command is the fallback.)
+- **Slash command:**
+  - `/taskmaster frontmatter suggest <skill|path> [more ...]`
+  - `/taskmaster frontmatter apply <suggestion-id> [--to <skill|path> ...] [--as file|override]`
+  - `/taskmaster frontmatter check <skill|path>`: lint existing frontmatter or an override.
+  - `/taskmaster frontmatter list`: every skill the mod knows, marked as having frontmatter, an override, or neither, with its run count and friction rate. It shows where frontmatter would pay off most.
+- **Nudges** (band only, never blocking, at most one per skill per week; `frontmatterNudges`), when:
+  - a new `SKILL.md` is written under a skills folder (seen through `tool.call` on `Write`/`Edit`),
+  - a skill's contract ran `advisory` because extraction confidence was low,
+  - a skill has repeated friction incidents (F15).
+
+  Each nudge reads `Add taskmaster frontmatter to <skill>? /taskmaster frontmatter suggest <skill>`.
+
+**F16.2 Finding the skill.** The mod's skill API only intercepts a skill as it loads; it can't list installed skills. So a target is resolved from:
+1. the skills the mod has seen load (`skill.prompt` `path`, `source`, `pluginName`, kept in `$.store`),
+2. a `$.fs.list` scan of the standard folders: the project's `.claude/skills/` and `.claude/commands/`, `~/.claude/skills/`, and the folders of installed plugins,
+3. an explicit path. Claude can also use the skill list in its own context to match a name.
+
+**F16.3 Tools the mod registers** (`isDeferred: false`):
+- **`taskmaster_frontmatter_draft { target }`** returns everything Claude needs to write a good recommendation:
+  - the skill's path, source, and current frontmatter,
+  - **the compiler's draft** (F1.2 parse + F1.3 extraction, with confidence),
+  - the schema and the authoring rules,
+  - **the skill's history:** its runs, incident categories, RCA proposals, and any existing override, for example "verify-spec mismatch ×4: the repo uses `pnpm test`",
+  - **repo facts for verify specs:** the test, lint, and build commands found in `package.json` scripts, `Makefile`, `pyproject.toml`, `Cargo.toml`, and so on.
+- **`taskmaster_frontmatter_validate { target, yaml }`** runs the deterministic lint (F16.7) and returns errors and warnings. A recommendation must pass it before it's shown.
+- **`taskmaster_frontmatter_apply { suggestion_id, targets[], mode }`** records the decision.
+  - `mode: override`: the mod writes `.taskmaster/overrides/<skill>.yaml` itself.
+  - `mode: file`: it returns the exact edit for Claude to make with the normal `Edit` tool. **The mod doesn't write skill files itself**, so the user's usual permission prompt and diff view apply.
+
+**F16.4 Workflow**
+1. **Resolve** the target to a path and its source.
+2. **Draft.** Call `taskmaster_frontmatter_draft`.
+3. **Read and refine.** Claude reads the skill file in full with `Read`, then refines the draft:
+   - step titles reuse the skill's own wording,
+   - conditional steps ("if…", "when…", "optionally") are made non-mandatory with a `when:` note,
+   - verify specs use commands that actually exist in this repo,
+   - irreversible steps (deploy, publish, push, delete, migrate) go in `confirm_before`,
+   - `mode: enforce` only when the steps are unambiguous, otherwise `advisory`.
+4. **Validate.** It must pass `taskmaster_frontmatter_validate`.
+5. **Present the recommendation:**
+   - the YAML,
+   - a one-line reason for each step, quoting the skill line it came from,
+   - **what changes in enforcement**, for example "today: advisory (confidence 0.55) → enforce; G1/G3 apply to 3 mandatory steps; `deploy` will ask you first",
+   - a diff preview of the file change.
+6. **The user chooses** (AskUserQuestion):
+   - **Add to this skill's file**
+   - **Save as an override only** (the skill file is untouched)
+   - **Also apply to other skills** (a multi-select of known skills, including one just created)
+   - **Edit first** (the user changes steps, and the flow returns to step 4)
+   - **Discard**
+7. **Apply**, then run the post-check (F16.6).
+
+**F16.5 Applying to a new skill or any other skill**
+- **Frontmatter is specific to its skill and is never copied verbatim.** For each other target, the flow runs steps 1–5 against *that* skill, using the approved suggestion as a template. The template carries over structure and conventions (the `confirm_before` pattern, the repo's verify commands, the strictness choice). Each step must then match something in the target's own text. Steps that don't match are dropped and listed, and each target gets its own review.
+- **Batch:** `suggest a b c` produces one review per skill. The user approves each one, or all at once.
+- **New skills:** when Claude is helping create a skill (including through a skill-creation skill), it offers to include the recommended frontmatter in the same write, so the skill is born with a contract.
+
+**F16.6 Where it's written, and safe-edit guarantees**
+
+| Skill source | Default target | Why |
+| --- | --- | --- |
+| `projectSettings` (the repo's `.claude/skills`) | the skill file | It's yours, versioned with the repo, and shared with the team |
+| `userSettings` (`~/.claude/skills`) | the skill file | It's yours |
+| A plugin you're developing (`--plugin-dir`, a folder marketplace) | its source file | It's yours |
+| An installed plugin (a git or npm copy) | override | Edits are overwritten on update, and it's not yours. Also offer a ready-to-paste **upstream suggestion** (the snippet and issue text) for its author |
+| `policySettings` (managed), `mcp`, `syncedSkills`, `built-in` (no file) | override only | It can't or shouldn't be edited |
+
+- **Post-check after the `Edit`:**
+  - the mod hashes the skill body and every other frontmatter key before and after. **Only the `taskmaster:` key may change.** Anything else triggers a hidden note asking Claude to revert it, and an incident is logged,
+  - the YAML parses, the schema validates, and existing keys (`name`, `description`, `allowed-tools`, ...) keep their values and order,
+  - replacing an existing `taskmaster:` block shows the old and new versions side by side first.
+- **Not committed automatically.** It's the user's content, unlike checkpoints.
+- **Active runs keep their current contract.** The new frontmatter takes effect the next time the skill loads (the hash changes, so the cached contract is dropped).
+- If a skill has both frontmatter and an override, `check` warns about any difference between them. The order of precedence stays as in F1.4.
+
+**F16.7 Lint rules** (for `validate` and `check`):
+- **Schema:** known keys, `version`, unique step ids, correct types.
+- **Grounding:** each step's title fuzzy-matches text in the skill body ("step `release` not found in the skill text").
+- **Runnable verify specs:** the command exists, for example `npm test` needs a `test` script in `package.json` and `pytest` needs its config. Missing ones are warned about.
+- **Reasonableness:** warn when:
+  - there are more than 12 mandatory steps,
+  - an irreversible-sounding step has no `confirm_before`,
+  - every step is mandatory but none has a `verify` ("the gates can only check that work happened"),
+  - `mode: enforce` is set but a mandatory step uses conditional language.
+
+**F16.8 Provenance and measurement**
+- Frontmatter written by the advisor carries `taskmaster.version: 1`, `taskmaster.origin: suggested`, and `suggested_by: taskmaster@<version>`. Hand-written frontmatter uses `origin: authored`. This feeds the `contract_source` split in F13.1.
+- Events logged:
+  - suggestion generated (steps, confidence),
+  - **each step accepted, edited, or removed by the user,**
+  - where it was applied and how,
+  - the post-check result,
+  - and, later, how runs perform for each origin.
+- **The user's edits to a suggestion are free, correct labels for the compiler.** They're logged as `extraction` incidents and feed the F15 loop.
+
 ## 6. Strictness levels
 
 | Level | Footer | Plan Gate | G1/G2 | G3/G4 Stop | Drift | Checkpoints | Audit |
@@ -404,6 +509,9 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 | Rating fatigue skews UX data | Sampled 1 in 3, at most once an hour, one click; weighted against implicit signals |
 | Checkpoint commits clutter history | `--only` pathspec commits with a fixed prefix (easy to squash or filter); `ref` mode in Phase 2 |
 | Comparing frontmatter vs none is confounded | Paired design: the same skills with and without frontmatter; arms assigned per run by hash |
+| Suggested frontmatter over-enforces a skill | Must pass validation (grounding, runnable verify, conditional-language checks); user review required; `advisory` when unsure; performance tracked per origin |
+| Advisor edits a file it shouldn't (another author's or managed) | Target chosen by skill source; installed and managed skills get an override plus an upstream suggestion |
+| Edit damages a skill | Edits go through the normal `Edit` tool with its permission prompt; post-check allows only the `taskmaster:` key to change; never committed automatically |
 
 ## 9. Build order
 
@@ -415,7 +523,8 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 5. that a `classic.Stop` block makes Claude continue,
 6. how skills preloaded into subagents are attributed,
 7. that a `git commit --only -- .taskmaster/` checkpoint commit leaves the user's staged work untouched,
-8. that metrics files can be written and rolled over within the hook budget.
+8. that metrics files can be written and rolled over within the hook budget,
+9. that a `skills/` folder in the plugin loads beside the hooks module (for the `taskmaster:frontmatter` skill).
 
 → **Gate A (technical go/no-go, §10.1).**
 
@@ -427,21 +536,22 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 - checkpoints and resume (F8.1–F8.6, with checkpoints committed; no fork auto-draft yet),
 - `/taskmaster`, the status line, and the summary below the answer,
 - **metrics:** the event log, run summaries, and sampled ratings (F13.1–F13.3), plus **experiment arms** (F13.4),
-- **canaries:** tripwires and incident records (F15.1), the circuit breaker (F15.5), and an on-demand `/taskmaster retro` that runs RCA over the queued incidents (F15.2, manual mode).
+- **canaries:** tripwires and incident records (F15.1), the circuit breaker (F15.5), and an on-demand `/taskmaster retro` that runs RCA over the queued incidents (F15.2, manual mode),
+- **frontmatter advisor, single skill:** the `taskmaster:frontmatter` skill and `suggest` / `apply` / `check`, with the three tools, the workflow, the source-based targets, the post-check, the lint, and provenance (F16.1–F16.4, F16.6–F16.8). This is built last in Phase 1, because Phase 1.5 uses it.
 
 **Phase 1.5: evaluation (about 2 weeks; this is the prototype trial).**
-- Write `taskmaster:` frontmatter for 5–10 evaluation skills (a mix of your own and third-party skills).
+- Use the frontmatter advisor (F16) to create `taskmaster:` frontmatter for 5–10 evaluation skills, a mix of your own and third-party skills, with the third-party ones saved as overrides. Hand-write it for at least 3 of them (`origin: authored`), so suggested and hand-written frontmatter can be compared.
 - Build the harness task suites and trap tasks (F13.5), and run them for each arm.
 - Dogfood the mod live with `experiment: on` for at least 30 runs.
 - Run `/taskmaster retro` weekly to rank the friction sources.
 
 → **Gate B (product go/no-go, §10.2).**
 
-**Phase 2: hardening.** The Plan Gate, G4, Drift, the advisory audit, question detection, redirect handling, multiple skills and subagent ownership, the Pane, F8.5 auto-draft, F8.7 locking, the per-skill contract editor, `ref` checkpoint mode, the full test suite, and automatic RCA with proposals and **replay validation** (F15.2–F15.4).
+**Phase 2: hardening.** The Plan Gate, G4, Drift, the advisory audit, question detection, redirect handling, multiple skills and subagent ownership, the Pane, F8.5 auto-draft, F8.7 locking, the per-skill contract editor, `ref` checkpoint mode, the full test suite, and automatic RCA with proposals and **replay validation** (F15.2–F15.4). Plus the remaining **frontmatter advisor** features (F16.5 batch and template application, new-skill integration, nudges, upstream suggestions, and `frontmatter list`).
 
 **Phase 3: judgment.** A blocking audit (one bite), the verifier subagent for semantic verify specs, frontmatter constraint guards that ask the user, shadow mode and staged rollout (F15.4), the metrics view, and loop metrics (F15.6).
 
-**Phase 4: ship.** Marketplace packaging, docs, and an authoring guide for the `taskmaster:` frontmatter key, along with a helper that drafts frontmatter for a skill from its extracted contract for the author to review.
+**Phase 4: ship.** Marketplace packaging, docs, and an authoring guide for the `taskmaster:` frontmatter key (the advisor itself, F16, is built in Phases 1 and 2).
 
 ## 10. Go / no-go gates
 
@@ -480,7 +590,8 @@ Write the thresholds down before the evaluation runs and don't move them during 
 
 **Universality reading** (sets direction rather than pass/fail): compare the `generic` arm with the `frontmatter` arm on the same skills.
 - If `generic` gets **≥ 70% of `frontmatter`'s reduction in silent skips**, with a friction rate no more than **10 points higher**, the universal approach is validated.
-- If it doesn't, **pivot to frontmatter-first:** enforce only skills that have frontmatter or a user-approved override, keep generic contracts advisory, and invest in the frontmatter-drafting helper (Phase 4) instead of better extraction.
+- If it doesn't, **pivot to frontmatter-first:** enforce only skills that have frontmatter or a user-approved override, keep generic contracts advisory, and make the **frontmatter advisor (F16)** the main way into the product instead of improving extraction.
+- **Advisor reading:** if suggested frontmatter comes within **10 points** of hand-written frontmatter on both friction rate and silent-skip reduction, the advisor is a sound replacement for hand-writing. If it doesn't, tighten its lint and review steps before Phase 2.
 
 **Decision:**
 - **GO** to Phase 2: all safety, at least 3 of 4 effectiveness, and all cost and experience criteria pass.
@@ -503,6 +614,10 @@ Write the thresholds down before the evaluation runs and don't move them during 
 7. **Checkpoints are committed:** each milestone produces one `taskmaster: checkpoint ...` commit that contains only `.taskmaster/`.
 8. **Metrics are complete:** every gate decision, intervention, and run end produces a schema-valid event tagged with `arm` and `contract_source`. `/taskmaster metrics export` produces a bundle the analysis script turns into the §10.2 table.
 9. **Canaries work:** each tripwire in F15.1 creates an incident, and `/taskmaster retro` turns queued incidents into RCAs with evidence citations and a taxonomy category. The circuit breaker trips on 3 user friction signals and never on Claude's own waivers.
+10. **The frontmatter advisor works:** asking "recommend taskmaster frontmatter for `<skill>`" produces a recommendation that passes validation, with a reason for each step and a preview of how enforcement changes.
+    - Choosing **add to file** changes only the `taskmaster:` key, which the post-check confirms.
+    - Choosing **override** leaves the skill file byte-for-byte unchanged.
+    - The next time that skill loads, the mod uses the new contract, tagged `frontmatter-suggested` or `override-suggested`.
 
 ## Appendix: changes made after the advisor review
 - Reframed the promise from "works harder" to "never silently skips, never claims done without evidence, never loses its place."
@@ -520,3 +635,8 @@ Write the thresholds down before the evaluation runs and don't move them during 
 - F13 rewritten: the mod owns its metrics files (third-party mods can't emit to Anthropic telemetry or the OpenTelemetry collector). Events and run summaries are tagged with `arm` and `contract_source`. UX signals are explicit (sampled ratings) and implicit (interventions, optional sentiment and `reports-skip` labels). The frontmatter-vs-none question uses a paired, per-run-randomized design, plus an offline harness with trap tasks.
 - F15 added: the self-improvement loop. Canary tripwires feed incidents, then an evidence-cited RCA with 5 whys (outside the user's turn, by a separate model call), then proposals, then replay, shadow, and staged validation, then human approval. A user-only circuit breaker is the single automatic adaptation.
 - §10 added: Gate A (technical) after the spike, and Gate B (product) after a two-week prototype trial, with pre-registered thresholds, a universality reading, and GO / ITERATE / NO-GO rules.
+
+## Appendix: changes made after the third review (user)
+- F16 added: the frontmatter advisor. The user asks Claude to read a skill and recommend `taskmaster:` frontmatter. Claude drafts it with the mod's compiler draft, the skill's history, and the repo's real commands. It's validated, presented with reasons and an enforcement preview, then applied to that skill, a new skill, or other skills (re-fitted to each one), or saved as an override.
+- Writes go through the normal `Edit` tool and a post-check that only the `taskmaster:` key changed. Installed and managed skills get an override and an upstream suggestion instead.
+- Overrides moved into the project (`.taskmaster/overrides/`, committed). `contract_source` now distinguishes suggested from hand-written frontmatter. Gate B gains an advisor reading. The advisor's core moved into Phase 1, because the evaluation uses it.
