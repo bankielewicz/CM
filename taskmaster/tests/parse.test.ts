@@ -522,3 +522,14 @@ test('an indented list under a bullet is nested, not the top level', () => {
 test("a heading's closing # sequence is stripped only when a space comes before it", () => {
   expect(titles('## Step 1: Learn C#\n\n## Step 2: Use F# ##\n\n## Step 3: Done ###  \n')).toEqual(['Learn C#', 'Use F#', 'Done'])
 })
+
+test('a plain bullet inside a checklist does not end it, and its command stays with the item above', () => {
+  const body = `- [ ] a\n- plain\n${shell('npm test')}- [ ] b\n`
+  const parsed = parseSkill(skill(body), {})
+  expect(parsed.steps.map(step => step.title)).toEqual(['a', 'b'])
+  expect(parsed.verifyCandidates).toEqual([{ command: 'npm test', line: BODY_LINE + 3, step: 'S1' }])
+})
+
+test('a plain bullet still ends a numbered list', () => {
+  expect(titles('1. a\n- plain\n2. b\n')).toEqual(['a'])
+})

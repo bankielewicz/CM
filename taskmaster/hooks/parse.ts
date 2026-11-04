@@ -166,6 +166,7 @@ function listSteps(lines: Line[], item: RegExp, kind: ParsedStep['kind']): Span[
     const line = lines[index] as Line
     const found = itemIn(line)
     if (found && found.indent < top + 2) items.push({ title: title(found.text), index })
+    else if (kind === 'checklist' && /^\s*[-*+]\s/.test(line.text)) continue // a plain bullet among the boxes
     else if (!line.code && line.text.trim() !== '' && line.text.search(/\S/) <= top) {
       last = index
       break
