@@ -712,6 +712,7 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
   - A command typed in the Claude app, in a cloud session, carries `origin: { kind: 'composer' }` (the `/tm-origin` probe, 2026-11-04). The app shows a command's text reply after the command's name (`tm-origin: <text>`), so a reply needn't repeat the name.
   - Pull requests Claude opens in this repository are authored by the owner's account, so the owner can't approve them in a PR review (F17.1).
   - The GitHub tools in this cloud session can run, re-run and cancel workflow runs, but have no method to approve a deployment.
+  - Seen on 2.1.318 (PR #8's `/clear` probe): a session drove a nested interactive `claude` through tmux and accepted its trust prompt for a scratch folder. So the nested-session route F17 describes works in practice, and P1.7b's guard on Bash that starts `claude` is needed.
 - **Learned in P1.2.**
   - `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, with no YAML block. A typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. Checked live: the capture's hash matched that form, and `/notes some words here` showed the block.
   - So a hash of the whole text changes with the skill's folder and with every argument. Contract caches and resume checks key on the body alone.
