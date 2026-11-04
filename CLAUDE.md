@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Taskmaster is a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. `docs/taskmaster-plan.md` is the design, and `docs/phase-1-tasks.md` is the build order. The mod is `taskmaster/`, built test-first one task at a time. So far it's the P1.0 scaffold: it reads its settings and runs a startup self-check, and every hook passes its event on unchanged. `spike/taskmaster-spike/` is the Phase 0 spike, an observe-only mod with one-shot probes that answered the Gate A checks (plan §10.1). It's due for deletion (P1.0b), so don't add to it.
+Taskmaster is a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. `docs/taskmaster-plan.md` is the design, and `docs/phase-1-tasks.md` is the build order. The mod is `taskmaster/`, built test-first one task at a time. So far it's the P1.0 scaffold: it reads its settings and runs a startup self-check, and every hook passes its event on unchanged. The Phase 0 spike, an observe-only mod with one-shot probes that answered the Gate A checks, was deleted after Gate A passed. Its result is in plan §10.1, and its files are in git history at [`d46b356`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike).
 
 ## Commands
 
@@ -43,7 +43,7 @@ How the bar is enforced:
 - `scripts/mod-coverage.mjs` measures under the real kit by instrumenting a temporary copy, because `claude plugin test` has no coverage option and silently ignores flags it doesn't know. Every source file in a mod counts, whether or not a test loads it, except test files and helpers in `tests/`, type declarations and `.claude-plugin/`. `istanbul ignore` comments have no effect. The counters come from what tests print, so a test written to print fake ones would pass: never write one, and look for that when reviewing tests.
 - A Stop hook (`.claude/settings.json`, `scripts/coverage-stop-hook.mjs`) blocks the end of a turn when a mod's code or tests differ from what's pushed and that mod is under the bar.
 - `.github/workflows/mod-coverage.yml` runs the gate on every PR and uploads Cobertura for the ruleset's "Restrict code coverage" rule. Its `mod-coverage` job is a required check, so keep that job name and don't give the workflow a `paths:` filter: a required check that gets filtered out never reports.
-- `coverage-exempt.json` excuses a mod from the percentage, with a reason. It's still measured and printed, failing tests still fail it, and it stays out of the uploaded report. Only the owner decides an exemption. With every mod exempt, the gate writes no report and the upload is skipped. `taskmaster` isn't exempt, so from PR #6 on the gate writes one. That PR's upload failed with HTTP 404, Code Quality probably being off, and the step stayed green because of `fail-on-error: false`. The coverage rule had nothing to read and reported nothing, so the `mod-coverage` check is what enforces the bar.
+- `coverage-exempt.json` excuses a mod from the percentage, with a reason. It's still measured and printed, failing tests still fail it, and it stays out of the uploaded report. Only the owner decides an exemption. An entry for a mod that no longer exists, like the spike's until the owner removes it (P1.0b), is ignored. With every mod exempt, the gate writes no report and the upload is skipped. `taskmaster` isn't exempt, so from PR #6 on the gate writes one. That PR's upload failed with HTTP 404, Code Quality probably being off, and the step stayed green because of `fail-on-error: false`. The coverage rule had nothing to read and reported nothing, so the `mod-coverage` check is what enforces the bar.
 - `gate-guard` (`.github/workflows/gate-guard.yml`, `scripts/gate-guard.mjs`) fails any PR that changes the gate's own files, dependency updates included. It runs from the base branch through `pull_request_target`, so it must never check out or run PR code. To change one of those files, the owner lifts the check in the ruleset.
 - `.claude/settings.json` denies Claude edits to the same files and `gh pr merge`, and a test keeps its list in step with `PROTECTED` in `scripts/gate-guard.mjs`. If one of those files needs changing, give the owner the exact edit; don't look for another way to write it.
 - The 95 lives in `THRESHOLD` in `scripts/mod-coverage.mjs` and in the GitHub ruleset, so change them together. The ruleset reads lines only, so only the `mod-coverage` check holds functions to it. Line coverage alone isn't enough, because loading a file runs every line of its one-line functions. Branch coverage is printed but not required. If the bar can't be met, ask; don't lower it or exclude files.
@@ -55,18 +55,6 @@ How the bar is enforced:
 - `hooks/selfcheck.ts` is the startup self-check (F14). It keeps one record per Claude Code build in `$.store`, under `self-check/<build>`, listing which of the events in `WATCHED` have fired there, and the settings of the last session to save it. `note()` returns at once. Saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
 - `types/index.d.ts` holds the mod's own types.
 - `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write, make the version lookup fail, hang or give any answer, and make `session.start` itself fail. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
-
-## Spike architecture
-
-- `hooks/register.tsx` holds nearly everything: all hooks, the `/tm-spike` command, the probes, and the persistence of findings.
-- `hooks/checks.ts` is the Gate A catalog (`CHECKS`), the verdict logic (`gateVerdict`, `modeVerdict`), and the status and report formatting.
-- `hooks/journal.ts` writes the rolling JSONL journal. It stores no prompt text, file contents or tool output, and redacts secrets before writing.
-- `tests/spike.test.ts` has no engine beneath the plugin: its `engine()` helper registers hooks that answer each `$` call the spike makes.
-- `skills/spike-probe/` exists only to test skill loading and attribution.
-
-Each hook passes its event on unchanged unless a probe is armed. Armed probes live in memory, fire once and disarm. Results are saved to `.taskmaster/spike/findings.json` (gitignored) and reloaded at `session.start`, so a hot reload forgets armed probes but keeps results.
-
-A new check means a `CheckId` in `types/index.d.ts`, an entry in `CHECKS`, a test, and a row in `RUNBOOK.md`. A new armed probe also needs `ProbeName` and `PROBE_HELP` in `register.tsx`.
 
 ## Mod API constraints
 
@@ -83,13 +71,11 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 
 ## Where the work stands
 
-`docs/phase-1-tasks.md` is the durable checklist for the Phase 1 MVP, and the first open item is the next step. Gate A's checklist, `spike/taskmaster-spike/GATE-A-TASKS.md`, is finished. Built-in tasks don't survive `/clear` or a new session, so re-create them from that file. `RUNBOOK.md` has the steps for each probe and how to read its result. Gate A is recorded in plan §10.1 (GO, 2026-11-03).
+`docs/phase-1-tasks.md` is the durable checklist for the Phase 1 MVP, and the first open item is the next step. Skip an item marked **Waiting on the owner**, such as P1.0b: its remaining step is the owner's. So the next step for Claude is P1.1. Built-in tasks don't survive `/clear` or a new session, so re-create them from that file. Gate A is recorded in plan §10.1 (GO, 2026-11-03).
 
-- `.taskmaster/spike/` isn't committed, so anything Gate A needs goes into plan §10.1. New spike learnings go into plan §9, and behaviour changes into `RUNBOOK.md`.
-- The default branch is protected and nobody can bypass the ruleset, so every change lands through a PR, including where `GATE-A-TASKS.md` says to push.
-- The spike predates the coverage bar and is exempt in `coverage-exempt.json`, at 61.58% (`hooks/register.tsx` 57.14%). Its tests must still pass. Gate A has closed, so retire the spike as `docs/phase-1-tasks.md` P1.0b says, in this order:
-  1. Land the first real mod: `taskmaster/`, in PR #6. With no mods at all the gate fails, which blocks every merge.
-  2. A PR deletes `spike/`. The gate ignores the leftover entry.
-  3. A second PR removes the entry, with the owner lifting `gate-guard` for it.
-
-  Removing the entry while `spike/` exists fails the gate at 61.58%.
+- New learnings about the mod API go into plan §9, and each task's status into `docs/phase-1-tasks.md`.
+- The default branch is protected and nobody can bypass the ruleset, so every change lands through a PR.
+- The spike is being retired as `docs/phase-1-tasks.md` P1.0b says, in this order:
+  1. Done: land the first real mod, `taskmaster/`, in PR #6. With no mods at all the gate fails, which blocks every merge.
+  2. Done: delete `spike/`, in PR #7. The gate ignores the leftover exemption entry.
+  3. The owner's step: a PR that changes `coverage-exempt.json` to `{}`, with the owner lifting `gate-guard` for it. Claude can't edit that file.

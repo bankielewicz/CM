@@ -517,7 +517,7 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 
 ## 9. Build order
 
-**Phase 0: spike (1–2 days). Built:** `spike/taskmaster-spike/`. Run it with `spike/taskmaster-spike/RUNBOOK.md`. Observe-only: capture skills, record the ledger, log to the journal, with one-shot probes for the checks that need an action. **Confirm on your build:**
+**Phase 0: spike (1–2 days). Built, then deleted after Gate A (P1.0b):** [`spike/taskmaster-spike/`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike) and its [runbook](https://github.com/bankielewicz/CM/blob/d46b356/spike/taskmaster-spike/RUNBOOK.md), kept in git history at `d46b356`. Observe-only: capture skills, record the ledger, log to the journal, with one-shot probes for the checks that need an action. **Confirm on your build:**
 1. the order of `tool.check` and `tool.call`,
 2. that `$.tool.call(TaskCreate)` seeds tasks Claude actually sees,
 3. whether the built-in task list persists across sessions,
@@ -592,7 +592,7 @@ Write the thresholds down before the evaluation runs and don't move them during 
 | `SessionStart.source` after `/clear` and after auto-compaction | Adapt the resume triggers. Not a no-go. |
 | Checkpoint commit with `--only` leaves the user's staged work untouched | Fallback: `ignore` plus `ref` mode. Not a no-go. |
 
-**Result: GO** (recorded 2026-11-03, Claude Code 2.1.317, in a cloud session). All three blocking checks passed (`stop-block`, `deny-write` and `deny-complete`), and all 18 spike checks are answered. The run covered three session ids: `9ea42fa8`, plus `119c2caf` and `a9a1ddbd`, each started by a `/clear`. The full log is in `spike/taskmaster-spike/GATE-A-TASKS.md`, because `.taskmaster/spike/` isn't committed.
+**Result: GO** (recorded 2026-11-03, Claude Code 2.1.317, in a cloud session). All three blocking checks passed (`stop-block`, `deny-write` and `deny-complete`), and all 18 spike checks are answered. The run covered three session ids: `9ea42fa8`, plus `119c2caf` and `a9a1ddbd`, each started by a `/clear`. The full log is the spike's [`GATE-A-TASKS.md`](https://github.com/bankielewicz/CM/blob/d46b356/spike/taskmaster-spike/GATE-A-TASKS.md), kept in git history at `d46b356` since the spike was deleted, because `.taskmaster/spike/` isn't committed.
 
 | Check | Result | What was seen |
 | --- | --- | --- |

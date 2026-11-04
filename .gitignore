@@ -1,4 +1,5 @@
-# Taskmaster spike output (journals, findings) is local data
+# Output of the deleted Phase 0 spike (journals, findings): local data. Kept ignored so
+# the mod's checkpoint commits (git add -- .taskmaster/, plan F8.1) never pick it up.
 .taskmaster/spike/
 
 # Coverage tooling

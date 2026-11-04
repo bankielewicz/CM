@@ -1,6 +1,6 @@
 # Phase 1 MVP: tasks
 
-This is the durable task list for the Phase 1 MVP prototype (`docs/taskmaster-plan.md` §9, "Phase 1"). Gate A passed (§10.1, GO, 2026-11-03). The first open item is the next step. Claude's built-in task list doesn't survive `/clear` or a new session, so re-create the open items from this file. The ids are `P1.n`. The milestones (M0–M9) are in build order, and each task names what it depends on.
+This is the durable task list for the Phase 1 MVP prototype (`docs/taskmaster-plan.md` §9, "Phase 1"). Gate A passed (§10.1, GO, 2026-11-03). The first open item is the next step. Skip an item marked **Waiting on the owner**: its remaining step is the owner's, and the item after it is the next step. Claude's built-in task list doesn't survive `/clear` or a new session, so re-create the open items from this file. The ids are `P1.n`. The milestones (M0–M9) are in build order, and each task names what it depends on.
 
 **How every task is done** (`CLAUDE.md`, "Developing a mod"):
 1. **Red:** write the listed tests first, and see them fail for the expected reason.
@@ -27,7 +27,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
 4. **`sentimentClassifier` waits** (PR #6 review). It's F13.3's optional label of your next prompt after a block. No Phase 1 task builds it, and a privacy setting that does nothing would mislead, so it isn't a setting yet. It comes back with the task that builds it.
 
 ## M0. Scaffold
-- [ ] P1.0 **Scaffold the mod** (F12, F14). Create `taskmaster/.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`, `types/` and `tests/`, with a test `engine()` helper like the spike's. Add the Phase 1 keys of `userConfig` (F12). At `session.start`, build the `Io` table and flush buffered early events. A startup self-check logs which events fired on this build (F14).
+- [x] P1.0 **Scaffold the mod** (F12, F14). **Done: merged in PR #6.** Create `taskmaster/.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`, `types/` and `tests/`, with a test `engine()` helper like the spike's. Add the Phase 1 keys of `userConfig` (F12). At `session.start`, build the `Io` table and flush buffered early events. A startup self-check logs which events fired on this build (F14).
   - **Waits for** the owner's fix to `.github/workflows/mod-coverage.yml:13`, the push filter that gives `main` a coverage baseline. PR #5, merged as `51f0959`, changed it to `branches: [main]`.
   - **The first coverage report.** Every mod so far has been exempt. So the gate has printed "No coverage report: every mod measured here is exempt.", and the "Upload coverage to GitHub" step has been skipped. P1.0 is the first PR to write `coverage/cobertura-coverage.xml`, which makes it the first live run of that upload step (`actions/upload-code-coverage`, with `fail-on-error: false`, so upload errors stay warnings) and of the ruleset's `code_coverage` rule. Report what they actually do, and record it under this task:
     - whether the upload succeeds or only warns,
@@ -67,8 +67,8 @@ Report the commands with their output. `main` is protected, so each task (or a s
 
     So the bar is enforced only by the `mod-coverage` check, as before.
   - Checked in an interactive terminal (2026-11-03): loaded with `claude --debug --plugin-dir`, hot reloads and an exit worked, the debug logs show no failed hook, and the owner saw nothing from the mod.
-- [ ] P1.0b **Delete the spike** (owner decision 3). Two PRs, in this order, and only after P1.0 is merged:
-  1. **Delete `spike/`.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`scripts/mod-coverage.mjs:331`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
+- [ ] P1.0b **Delete the spike** (owner decision 3). **Waiting on the owner: step 2.** Two PRs, in this order, and only after P1.0 is merged:
+  1. **Delete `spike/`. Done in PR #7.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`scripts/mod-coverage.mjs:331`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
   2. **Remove the exemption entry.** A second PR deletes the `spike/taskmaster-spike` entry from `coverage-exempt.json`. That file is protected: Claude can't edit it (`.claude/settings.json`), and `gate-guard` fails the PR until the owner lifts that check in the ruleset for it. `main` takes no direct pushes, so this step is a PR too.
 
   Don't reverse the order. Removing the entry while `spike/` exists fails `mod-coverage`, because the spike is at 61.58% (`scripts/mod-coverage.mjs:281`).

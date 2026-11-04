@@ -1,6 +1,0 @@
-{
-  "name": "taskmaster-spike",
-  "version": "0.1.0",
-  "description": "Taskmaster Phase 0 spike: observe-only journal plus opt-in probes that answer the Gate A feasibility checks",
-  "types": "./types/index.d.ts"
-}
