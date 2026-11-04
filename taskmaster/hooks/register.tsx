@@ -22,10 +22,10 @@ export const register: Register = (on, options) => {
   const selfCheck = new SelfCheck()
   const skills = new SkillTracker()
   const saves = new SaveQueue()
-  // The captures so far, read once from $.state. Only this module writes them,
-  // so a plain write needs no compare-and-set. That also keeps it clear of
-  // `update`, which retries on a read the docs say is one moment per dispatch.
-  // It's current once `saves` is idle, not when a hook answers.
+  // The captures so far, read once from $.state and emptied at each session.end.
+  // Only this module writes them, so a plain write needs no compare-and-set. That
+  // also keeps it clear of `update`, which retries on a read the docs say is one
+  // moment per dispatch. It's current once `saves` is idle, not when a hook answers.
   let captured: SkillCapture[] | undefined
 
   // Notes an event for the self-check. It never waits on the store.
@@ -50,7 +50,24 @@ export const register: Register = (on, options) => {
 
   // The observers: each notes its event and passes it on unchanged. The engine
   // takes only a function literal as a hook, so each is written out here.
-  on('session.end', (_, e, next) => { seen('session.end'); return next(e) })
+  // A /clear or a resume ends the conversation and carries on in this process, with
+  // no session.start, so the captures start over here. Queued, so saves from before
+  // it land first and skills loaded after it land behind it. The held list is what
+  // matters: a save re-reads $.state only while it's undefined, so it's never set
+  // back to that. The write keeps a later hot reload or another reader from seeing
+  // the old list, and if it fails the held list is still empty.
+  on('session.end', ($, e, next) => {
+    seen('session.end')
+    saves.add(async () => {
+      captured = []
+      try {
+        await $.state.set({ plugin: 'taskmaster', key: 'skills' }, { shape: SKILLS_SHAPE, value: [] })
+      } catch (error) {
+        $.ui.log(`taskmaster: couldn't clear the recorded skills: ${reason(error)}`, { to: 'debug' })
+      }
+    })
+    return next(e)
+  })
   on('session.compact', (_, e, next) => { seen('session.compact'); return next(e) })
   on('turn.start', (_, e, next) => { seen('turn.start'); return next(e) })
   on('turn.complete', (_, e, next) => { seen('turn.complete'); skills.acted(e.agentId); return next(e) })
