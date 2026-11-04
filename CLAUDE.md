@@ -76,7 +76,7 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 - The API has no YAML parser. Frontmatter arrives parsed in `e.frontmatter`, and override files are JSON (owner decision, plan F1.9).
 - `$.ui.log` goes to the visible transcript unless given `{ to: 'debug' }`. The mod's own diagnostics always say `debug`.
 - `$.store` is a plain JSON file (`~/.claude/plugins/store/<plugin>_<source>-<hash>.json`) that the same OS user can edit. Don't treat it as tamper-proof (plan F17).
-- A plugin's `tool.check` `ask` goes to a person; a `-p` run refuses it. The model can't run a plugin's registered command (the `Skill` tool refuses), and a typed command in a `-p` run arrives as `origin: sdk`.
+- A plugin's `tool.check` `ask` goes to a person; a `-p` run refuses it. The model can't run a plugin's registered command (the `Skill` tool refuses), and a typed command arrives as `origin: composer` in the Claude app and `origin: sdk` in a `-p` run.
 - An atom with a `shape` stores `{ shape, value }`. A plain `$.state.get` returns that wrapper, and `read($, atom)` unwraps it.
 
 ## Where the work stands

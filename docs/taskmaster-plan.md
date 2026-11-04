@@ -489,6 +489,7 @@ The worry is Claude weakening what it's held to, to "game" the system: editing a
 - The personal layer is a plain JSON file, `~/.claude/plugins/store/<plugin>…json` (seen on 2.1.317).
 - The mod's own source and docs can be read too.
 - In a cloud container Claude runs as root, so file permissions don't help either.
+- Claude can start a nested interactive `claude` from the shell and drive it, with `tmux` for example. It could type a `/taskmaster` command there, which arrives with origin `composer`, and answer that session's `$.ui.ask` itself. So the person-only channels below hold only while Claude doesn't do that. The guard sends a shell command that starts `claude` to a person, and the tripwire records it.
 
 So F17 is a guard rail, not a security boundary, in the same way as this repository's own deny rules, and in line with §7: *visible* skipping, not perfect prevention.
 
@@ -512,10 +513,11 @@ The mod's own code is covered by visibility only.
    - The personal layer is written only by a typed `/taskmaster` command, followed by `$.ui.ask` for any loosening.
    - Seen live: the model can't run a plugin's registered command. The `Skill` tool refuses it ("Ask the user to run /gp-hello themselves").
    - F16's `taskmaster_frontmatter_apply` is a tool the model can call, so it puts the decision to the person itself, through `$.ui.ask`. F16.4's AskUserQuestion step is the model's own, so it doesn't count.
-   - The command's `origin` isn't relied on. It reads `sdk` for a typed command in a `-p` run, and a nested `claude -p` that Claude starts from the shell would read the same. The `$.ui.ask` step is what can't be faked.
+   - The command's `origin` isn't relied on. A command typed in the Claude app reads `composer`, and one typed in a `-p` run reads `sdk`. A nested `claude -p` that Claude starts from the shell would read `sdk` too, and a nested interactive one driven through `tmux` would read `composer`. The `$.ui.ask` step is what Claude can't answer from its own session.
 4. **A guard in `tool.check`.** It answers `ask` for:
    - `Write`, `Edit` and `NotebookEdit` on a protected path,
-   - non-read-only `Bash` whose command names one.
+   - non-read-only `Bash` whose command names one,
+   - `Bash` that starts a nested `claude`, which could type a command and answer its dialog (best effort, like the rest of the `Bash` guard).
 
    A plugin's `ask` goes to a person.
    - Seen live on 2.1.317: in default and accept-edits modes, a `-p` run refused the write, and the file wasn't created.
@@ -609,6 +611,7 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
   - A plugin's `tool.check` `ask` goes to a person. A `-p` run, with no person, refused the write in default and accept-edits modes, and the file wasn't created. Bypass mode is untested.
   - The model can't run a plugin's registered command: the `Skill` tool refuses it.
   - A typed command in a `-p` run carries `origin: { kind: 'sdk' }`, not `composer`.
+  - A command typed in the Claude app, in a cloud session, carries `origin: { kind: 'composer' }` (the `/tm-origin` probe, 2026-11-04). The app shows a command's text reply after the command's name (`tm-origin: <text>`), so a reply needn't repeat the name.
 - **Learned in P1.2.**
   - `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, with no YAML block. A typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. Checked live: the capture's hash matched that form, and `/notes some words here` showed the block.
   - So a hash of the whole text changes with the skill's folder and with every argument. Contract caches and resume checks key on the body alone.

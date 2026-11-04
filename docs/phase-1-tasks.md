@@ -139,7 +139,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - the mod's `$.store` file (`~/.claude/plugins/store/taskmaster*`),
     - a project skill's `taskmaster:` key,
     - settings files where a write touches the mod's `pluginConfigs`.
-  - **The guard:** `tool.check` answers `ask` for `Write`, `Edit` and `NotebookEdit` on a protected path, and for non-read-only `Bash` that names one (best effort).
+  - **The guard:** `tool.check` answers `ask` for `Write`, `Edit` and `NotebookEdit` on a protected path. It also answers `ask`, as a best effort, for non-read-only `Bash` that names a protected path, and for `Bash` that starts a nested `claude`, which could type a command and answer its dialog.
   - **Freeze and approval:** a run keeps the contract it started with. A change that loosens a contract (as F17 defines it) applies only after the person's yes in `$.ui.ask`, and never in a `-p` run. A change that only tightens applies at once.
   - **The personal layer:** read from and written to `$.store`, keyed by repository and skill. It's written only by a typed `/taskmaster` command or after `$.ui.ask`. Its session copy lives in `$.state`, so a store that differs from the mod's last write is ignored and files an incident.
   - **Visibility:** the source of each override is recorded for P1.17's summary, and a loosened contract is flagged. A tool call that touches a protected path is recorded for P1.21's *model gaming* tripwire.
@@ -147,7 +147,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - **Open questions for the owner, before this task starts:**
     1. Which layer wins when both exist?
     2. May an override beat a third-party skill's own frontmatter?
-  - **Still to check live:** the `origin` of a command typed in the Claude app (try the `/tm-origin` probe in this session), and a plugin's `ask` in bypass mode.
+  - **Checked live:** a command typed in the Claude app carries `origin: { kind: 'composer' }` (the `/tm-origin` probe, 2026-11-04). **Still to check live:** a plugin's `ask` in bypass mode.
 
   **Red:**
   - each guarded write gets `ask`, and an unguarded one doesn't,
