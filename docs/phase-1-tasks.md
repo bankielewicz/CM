@@ -82,7 +82,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
 ## M1. Contract compiler (F1)
 - [x] P1.1 **Capture and attribute** (F1.1). **Done: PR #8.** On `skill.prompt`, capture the skill, frontmatter, source, plugin name, path and a content hash. Attribute it to a loop: through the `Skill` tool's `tool.call.agentId`, through `agent.spawn` for preloaded skills, or to the main loop for a typed `/name` (spike: `skill-attribution`). **Red:** one test per attribution path. *Depends on P1.0.*
   **Status (2026-11-04):**
-  - `hooks/skills.ts` captures each skill into `$.state` (`taskmaster.skills`, the newest 20), with a SHA-256 of its text and its loop, saved after the hook answers. Not the text itself. 29 tests beyond P1.0's 72; coverage stays at 100% of lines and functions.
+  - `hooks/skills.ts` captures each skill into `$.state` (`taskmaster.skills`, the newest 20), with a SHA-256 of its text and its loop, saved after the hook answers. Not the text itself. 49 new tests, 29 of them from the review round below; coverage stays at 100% of lines and functions.
   - **Attribution, from orders seen live.** Each of these can claim a skill. One loop gets it, and two leave it `unattributed`:
     1. An open `Skill` call whose `skill` matches: `skill.prompt` fires inside the call.
     2. An open `prompt.submit` whose `command` matches: a typed `/name` expands inside `prompt.submit`'s `next(e)`, before the main `turn.start`.
