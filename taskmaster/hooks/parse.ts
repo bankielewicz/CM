@@ -191,7 +191,7 @@ function rules(lines: Line[]): ParsedRule[] {
   return found
 }
 
-const HEREDOC = /^<<(?!<)-?\s*(?:\\|['"])?([A-Za-z_]\w*)/
+const HEREDOC = /^<<-?\s*(?:\\|['"])?([A-Za-z_]\w*)/
 /** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
 const ENV_PREFIX = /^(?:[A-Za-z_]\w*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])*\s+)+/
 
