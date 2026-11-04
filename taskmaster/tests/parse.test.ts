@@ -710,3 +710,24 @@ test('the title cap counts the code span, not what stood in for it', () => {
 test("text that looks like what stands in for a code span is left alone", () => {
   expect(titles('1. \u00009\u0000 x\n')).toEqual(['\u00009\u0000 x'])
 })
+
+// ------------------------------------------------------------ PR #16's review
+
+test('arithmetic stays open across lines, so a shift on a later line opens no heredoc', () => {
+  expect(commandsIn(shell('echo $((', '  1 << 2', '))', 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('((', '  1 << 2', '))', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('echo $((', '  1 << 2', ')) && npm test'))).toEqual(['npm test'])
+})
+
+test("a code block's end closes arithmetic left open in it", () => {
+  expect(commandsIn(`${shell('((')}${shell('cat <<EOF', 'npm test', 'EOF', 'make lint')}`)).toEqual(['make lint'])
+})
+
+test('closed arithmetic leaves a heredoc on a later line to open as usual', () => {
+  expect(commandsIn(shell('x=$((1<<2))', 'cat <<EOF', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+})
+
+test('a line that starts inside arithmetic is still read for commands', () => {
+  const [command] = commandsIn(shell('((cd a);', 'npm test)'))
+  expect(command?.startsWith('npm test')).toBe(true)
+})

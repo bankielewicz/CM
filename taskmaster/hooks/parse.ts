@@ -252,13 +252,13 @@ const ENV_PREFIX = /^(?:[A-Za-z_]\w*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])*\s+)+
 /**
  * One shell line's `&&`, `||` and `;` segments, and the terminators of any
  * heredocs it opens. It reads quotes, comments and arithmetic, and little else:
- * this is not a shell parser.
+ * this is not a shell parser. `arithmetic` is the depth still open from the lines
+ * before, and it returns the depth open after this one.
  */
-function readShell(text: string): { segments: string[]; heredocs: Heredoc[] } {
+function readShell(text: string, arithmetic: number): { segments: string[]; heredocs: Heredoc[]; arithmetic: number } {
   const segments: string[] = []
   const heredocs: Heredoc[] = []
   let quote = ''
-  let arithmetic = 0
   let start = 0
   let end = text.length
   for (let at = 0; at < end; at += 1) {
@@ -283,7 +283,7 @@ function readShell(text: string): { segments: string[]; heredocs: Heredoc[] } {
     }
   }
   segments.push(text.slice(start, end))
-  return { segments, heredocs }
+  return { segments, heredocs, arithmetic }
 }
 
 function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
@@ -291,12 +291,14 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   const seen = new Set<string>()
   let pending: { text: string; line: number } | undefined
   let heredocs: Heredoc[] = []
+  let arithmetic = 0
   for (const line of lines) {
     const fence = line.code?.fence === true
     if (fence) {
       // A code block's end ends whatever was still open in it.
       pending = undefined
       heredocs = []
+      arithmetic = 0
     }
     if (!line.code || !SHELLS.has(line.code.lang) || fence) continue
     const heredoc = heredocs[0]
@@ -315,8 +317,9 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
       continue
     }
     pending = undefined
-    const shell = readShell(joined)
+    const shell = readShell(joined, arithmetic)
     heredocs = shell.heredocs
+    arithmetic = shell.arithmetic
     for (const segment of shell.segments) {
       const command = segment.trim().replace(ENV_PREFIX, '')
       if (!VERIFY.some(pattern => pattern.test(command))) continue
