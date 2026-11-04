@@ -36,9 +36,10 @@ const ANY_ITEM = /^(\s*(?:[-*+]|\d+[.)]))(\s+)/
 /**
  * `fence`: the line is a code fence itself. `indent`: the fence's, on the lines
  * inside it. `inList`: a list was open when this line began. `afterText`: the line
- * before it was text, not blank or code.
+ * before it was text, not blank or code. `inHtml`: an HTML block was open when
+ * this line began, so a list marker on it isn't an item.
  */
-type Line = { text: string; number: number; code?: { lang: string; fence?: true; indent?: number }; inList?: boolean; afterText?: boolean }
+type Line = { text: string; number: number; code?: { lang: string; fence?: true; indent?: number }; inList?: boolean; afterText?: boolean; inHtml?: boolean }
 
 /** A step and the lines that belong to it, for placing commands under steps. */
 type Span = { step: ParsedStep; end: number }
@@ -83,6 +84,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
   let fence: { marker: string; lang: string; indent: number } | undefined
   let listIndent: number | undefined
   let contentIndent = 0
+  let htmlCloser: string | undefined
   let codeMayStart = true
   let afterText = false
   return lines.map(line => {
@@ -98,13 +100,17 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       const blank = line.text.trim() === ''
       if (!blank && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : line.text.search(/\S/) >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
       codeMayStart = blank
-      const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}) }
+      const inHtml = htmlCloser !== undefined
+      // A blank line ends any of them. CommonMark lets a comment run on past one, and reading on from there is what `main` did.
+      if (htmlCloser !== undefined && (blank || (htmlCloser !== '' && line.text.includes(htmlCloser)))) htmlCloser = undefined
+      const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}), ...(inHtml ? { inHtml } : {}) }
       afterText = !blank
       // `* * *` and `- - -` have a list marker's shape, and are thematic breaks.
       const item = THEMATIC_BREAK.test(line.text) ? null : ANY_ITEM.exec(line.text)
       if (item) contentIndent = (item[1] as string).length + ((item[2] as string).length > 4 ? 1 : (item[2] as string).length)
-      if (item && LIST_ITEM.test(line.text)) listIndent = Math.min(listIndent ?? Number.POSITIVE_INFINITY, line.text.search(/\S/))
+      if (item && !inHtml && LIST_ITEM.test(line.text)) listIndent = Math.min(listIndent ?? Number.POSITIVE_INFINITY, line.text.search(/\S/))
       else if (listIndent !== undefined && endsList(marked, listIndent)) listIndent = undefined
+      if (!inHtml && listIndent === undefined) htmlCloser = opensHtml(line.text)
       return marked
     }
     const current = fence
@@ -124,10 +130,14 @@ const CHECKLIST = /^(\s*)[-*+]\s+\[[ xX]\]\s+(.*)$/
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/
 const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
 
-/** A blockquote, or an HTML block of CommonMark's types 2 to 5: comment, `<?`, declaration, CDATA. */
-const QUOTE_OR_MARKUP = /^ {0,3}(?:>|<(?:!--|\?|![A-Za-z]|!\[CDATA\[))/
-/** CommonMark's HTML block type 1, which has no closing form here: `</pre>` starts nothing. */
-const RAW_TAG = /^ {0,3}<(?:script|pre|style|textarea)(?:[ \t>]|$)/i
+/** CommonMark's HTML blocks of types 1 to 5, and what ends each. Type 1 has no closing form here: `</pre>` starts nothing. */
+const HTML_BLOCKS: readonly (readonly [RegExp, string])[] = [
+  [/^ {0,3}<(?:script|pre|style|textarea)(?:[ \t>]|$)/i, '</'],
+  [/^ {0,3}<!--/, '-->'],
+  [/^ {0,3}<\?/, '?>'],
+  [/^ {0,3}<![A-Za-z]/, '>'],
+  [/^ {0,3}<!\[CDATA\[/, ']]>'],
+]
 const BLOCK_TAG = /^ {0,3}<\/?([A-Za-z][A-Za-z0-9-]*)(?:[ \t]|\/?>|$)/
 /** CommonMark 0.31.2's HTML blocks, type 6. Any other tag is type 7, which can't interrupt a paragraph. */
 const BLOCK_TAGS = new Set([
@@ -137,9 +147,21 @@ const BLOCK_TAGS = new Set([
   'th', 'thead', 'title', 'tr', 'track', 'ul',
 ])
 
+/** What ends the HTML block this line starts, `''` for a blank line, or undefined if it starts none. */
+function htmlEnd(text: string): string | undefined {
+  const end = HTML_BLOCKS.find(([start]) => start.test(text))?.[1]
+  return end ?? (BLOCK_TAGS.has(BLOCK_TAG.exec(text)?.[1]?.toLowerCase() ?? '') ? '' : undefined)
+}
+
+/** What ends the HTML block this line leaves open: undefined if it starts none, or closes it on the same line. */
+function opensHtml(text: string): string | undefined {
+  const end = htmlEnd(text)
+  return end && text.includes(end) ? undefined : end
+}
+
 /** Whether a line can interrupt a paragraph by starting a block of its own. Fences and list items are read before this. */
 function startsBlock(text: string): boolean {
-  return HEADING.test(text) || THEMATIC_BREAK.test(text) || QUOTE_OR_MARKUP.test(text) || RAW_TAG.test(text) || BLOCK_TAGS.has(BLOCK_TAG.exec(text)?.[1]?.toLowerCase() ?? '')
+  return HEADING.test(text) || THEMATIC_BREAK.test(text) || /^ {0,3}>/.test(text) || htmlEnd(text) !== undefined
 }
 
 /**
@@ -206,7 +228,7 @@ function headingSteps(lines: Line[]): Span[] | undefined {
  */
 function listSteps(lines: Line[], item: RegExp, kind: ParsedStep['kind']): Span[] | undefined {
   const itemIn = (line: Line): { indent: number; text: string } | undefined => {
-    const match = line.code ? null : item.exec(line.text)
+    const match = line.code || line.inHtml ? null : item.exec(line.text)
     return match ? { indent: (match[1] ?? '').length, text: match[2] ?? '' } : undefined
   }
   const startsList = (found: { indent: number }, line: Line): boolean => found.indent < 2 || (found.indent <= 3 && !line.inList)

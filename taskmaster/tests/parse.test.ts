@@ -813,3 +813,38 @@ test('an item too deep to open a list opens none', () => {
 test('a list indented under a bullet stays nested, not a list of its own', () => {
   expect(titles('- a\n\n    1. nested\n')).toEqual([])
 })
+
+test('an item inside an HTML block is not an item, and the block runs to its blank line', () => {
+  expect(titles('<div>\n1. a\n2. b\n')).toEqual([])
+  expect(titles('<div>\n- [ ] a\n')).toEqual([])
+  expect(rulesIn('<div>\n1. a\nnpm test\n\n      MUST six\n')).toEqual([])
+})
+
+test('each other kind of HTML block runs to its own closer', () => {
+  for (const [open, close] of [['<!-- c', '-->'], ['<?x', '?>'], ['<!X y', '>'], ['<![CDATA[', ']]>'], ['<pre>', '</pre>']]) {
+    expect(titles(`${open}\n1. a\n${close}\n1. b\n`)).toEqual(['b'])
+  }
+})
+
+test('an HTML block closed on its own line leaves the next line alone', () => {
+  for (const line of ['<!-- c -->', '<?x?>', '<!X y>', '<![CDATA[x]]>', '<pre>x</pre>']) {
+    expect(titles(`${line}\n1. a\n`)).toEqual(['a'])
+  }
+})
+
+test('a blank line ends any HTML block, so a list after one is read', () => {
+  expect(titles('<div>\n\n1. a\n')).toEqual(['a'])
+  expect(titles('<!-- c\n\n1. a\n')).toEqual(['a'])
+})
+
+test('a tag that cannot start a block opens no HTML block', () => {
+  expect(titles('<span>\n1. a\n')).toEqual(['a'])
+})
+
+test('a rule inside an HTML block still counts', () => {
+  expect(rulesIn('<details>\nYou MUST x\n</details>\n')).toEqual(['MUST'])
+})
+
+test('a block tag deeper than an open list stays in the list', () => {
+  expect(titles('1. a\n   <div>\n2. b\n')).toEqual(['a', 'b'])
+})
