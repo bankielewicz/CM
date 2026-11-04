@@ -188,7 +188,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
 ## M4. Checkpoints and resume (F8.1–F8.6)
 - [ ] P1.12 **Store and contents** (F8.1, F8.2).
   - **Files:** `.taskmaster/active.json`; `runs/<id>/checkpoint.json` (schema-versioned); `HANDOFF.md`; journal chunks in `journal-<n>.jsonl`.
-  - **Mirror:** a mirror and index in `$.store`.
+  - **Mirror:** a mirror and index of the checkpoints in `$.store`.
   - **Redaction:** secrets are redacted before every write.
   - **Finding a run:** a run is found through `active.json`, never by session id. `/clear` changes the id, and a restart keeps it (plan §9).
 

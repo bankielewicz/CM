@@ -188,7 +188,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
     HANDOFF.md                # narrative briefing for a cold session
     journal-<n>.jsonl         # event log, rolled into chunks (no append in $.fs)
 ```
-- `$.store` holds only a mirror and an index (it's per user and per machine).
+- For checkpoints, `$.store` holds only a mirror and an index (it's per user and per machine).
 - Secrets are redacted before every write.
 - **`checkpointGit: commit` (default, approved).** At milestone checkpoints (step completed, PreCompact, Stop with open work, session end), the mod commits `.taskmaster/` (always at `$.session.root()`, never relative to a working directory a shell `cd` can move) alone, through `$.process.run`: first `git add -- .taskmaster/`, then `git commit --only -m "taskmaster: checkpoint <run> <step>" -- .taskmaster/`. The `add` is required: `commit --only` refuses paths git doesn't track yet, and a new run's files are untracked. `--only` keeps the user's other staged work out of the commit and leaves it staged (verified locally; the spike re-checks on your build). The fixed prefix makes these commits easy to squash or filter before a PR. Commits are throttled to at most one per milestone. Other values: `ignore` (excluded through `.git/info/exclude`) and, in Phase 2, `ref` (commit to `refs/taskmaster/<run>` with a temporary index, so the working branch history isn't touched).
 - **`checkpointPush`:** `off` (default) or `milestone`. Commits survive a new session on the same clone. **In ephemeral containers (cloud sessions), the commits must also be pushed to survive**, so set `milestone` there, or rely on the session's own push.
@@ -532,7 +532,7 @@ The mod's own code is covered by visibility only.
    - Checkpoint commits leave `overrides/` out (F8.1), so the mod's own commit never turns an unapproved edit into history that looks reviewed.
 
 **F17.1 Trusting the default branch: the override guard** (owner decision, 2026-11-04). In a fresh cloud container the store is empty, so each project file that loosens a contract would ask again. A repository can instead hold override changes when they're reviewed:
-- **The CI check.** Taskmaster ships a workflow template that holds any pull request changing a file under `overrideDir` until the owner approves it. It flags every change, tightening included. A loosening-only check, which would run the base branch's `contract.ts` on the files as data, is a later refinement.
+- **The CI check.** Taskmaster ships a workflow template that holds any pull request changing a file under `overrideDir`, or the workflow itself, until the owner approves it. It flags every change, tightening included. A loosening-only check, which would run the base branch's `contract.ts` on the files as data, is a later refinement.
 - **Why an environment, not a PR review.** Claude opens pull requests under the owner's account, and GitHub doesn't let an author approve their own pull request, so neither a PR review nor a CODEOWNERS rule can hold them. The approval is a GitHub environment, `taskmaster-overrides`, with the owner as its required reviewer and *Prevent self-review* off. The owner approves in the run's *Review deployments* dialog, or with `gh api`. Environments with reviewers are available for public repositories on every plan, and for private ones on paid plans.
 - **The mod's side,** with `overrideTrust: default-branch` (F12, opt-in). A project file whose content matches the default branch's version applies without asking: with the check required and no bypass, every change on that branch was approved. The mod fetches the default branch itself, so a moved local ref can't fake a match, and the guard (4) also watches `git remote set-url`, `git update-ref` and writes under `.git/`. The default, `ask`, is right for a repository without the check, because the mod can't tell whether one runs.
 - **The residual.** The approval rests on the owner's GitHub account, and Claude works through credentials that act as that account. The GitHub tools in this cloud session have no method to approve a deployment (checked 2026-11-04), but a shell call to the API might succeed if the session's token allows it. So this approval is a guard rail like the rest of F17, not the outside authority below. To narrow it:
@@ -556,7 +556,9 @@ The mod's own code is covered by visibility only.
 #    override-approval, required status checks. A required check can't report on the pull
 #    request that adds it. Both are needed, because override-approval is skipped, which
 #    counts as a pass, both when no override file changed and when override-changes fails.
-# 3. If you changed taskmaster's overrideDir setting, change OVERRIDE_DIR below to match.
+# 3. If you changed taskmaster's overrideDir setting, change OVERRIDE_DIR below to match. If
+#    you rename this file, change GUARD_FILE: a change to this workflow needs approval too,
+#    or a pull request could switch the guard off before it next runs.
 #
 # Each new push, and each edit of the pull request, asks for approval again. Skipping the
 # approval on an edit would let that skipped run count as a pass.
@@ -573,6 +575,7 @@ permissions:
 
 env:
   OVERRIDE_DIR: .taskmaster/overrides
+  GUARD_FILE: .github/workflows/taskmaster-override-guard.yml
 
 jobs:
   override-changes:
@@ -582,7 +585,7 @@ jobs:
     outputs:
       touched: ${{ steps.list.outputs.touched }}
     steps:
-      - name: List the override files this pull request changes
+      - name: List the override files, and this guard, if the pull request changes them
         id: list
         env:
           GH_TOKEN: ${{ github.token }}
@@ -600,9 +603,9 @@ jobs:
           touched=false
           while IFS= read -r path; do
             case "$path" in
-              "$OVERRIDE_DIR"/*)
+              "$OVERRIDE_DIR"/* | "$GUARD_FILE")
                 if [ "$touched" = false ]; then
-                  printf '### Override files this pull request changes\n\n' >> "$GITHUB_STEP_SUMMARY"
+                  printf '### Override files or the override guard this pull request changes\n\n' >> "$GITHUB_STEP_SUMMARY"
                 fi
                 touched=true
                 # A file name comes from the pull request, so keep it inside a code span.
