@@ -327,13 +327,23 @@ test('a hung $.state holds up no skill', { timeoutMs: 3_000 }, async ($, on) => 
 test('captures land in the order the skills loaded, even when the first write is slow', async ($, on) => {
   const world = engine(on, { holdFirstStateWrite: true })
   await start($)
-  const first = expand($, 'one')
+  // Every write, so a late first write can't hide by overwriting a newer list.
+  const writes: string[][] = []
+  world.onChange.push(function watch() {
+    writes.push(captures(world).map(capture => capture.skill))
+    world.onChange.push(watch)
+  })
+  await expand($, 'one')
+  await until(world, () => world.stateHeld)
   await expand($, 'two')
+  // Time for a second save to reach its write, if anything lets it run this early.
+  for (let turn = 0; turn < 5; turn += 1) await contentHash('let other work run')
+  expect(writes.filter(list => list.length > 0)).toEqual([])
   world.releaseState()
-  await first
 
   const all = await settled($, world)
   expect(all.map(capture => capture.skill)).toEqual(['one', 'two'])
+  expect(writes.filter(list => list.length > 0).slice(0, 2)).toEqual([['one'], ['one', 'two']])
 })
 
 test('captures are written with their shape', async ($, on) => {

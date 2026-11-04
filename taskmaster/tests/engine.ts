@@ -24,6 +24,8 @@ export type World = {
   state: Map<string, unknown>
   /** Every `$.ui.log` line, with where it was sent. */
   logs: { text: string; to: string }[]
+  /** True once `holdFirstStateWrite` is holding a write. */
+  stateHeld: boolean
   /** Lets the first `$.state` write finish, when `holdFirstStateWrite` held it. */
   releaseState: () => void
   /** Called after each `$.state` write and each `$.ui.log` line. */
@@ -102,6 +104,7 @@ export function engine(on: On, options: EngineOptions = {}): World {
     onWrite: [],
     state: new Map(),
     logs: [],
+    stateHeld: false,
     releaseState: () => releaseState(),
     onChange: [],
   }
@@ -221,6 +224,8 @@ export function engine(on: On, options: EngineOptions = {}): World {
     if (options.hangStateWrites) await new Promise<never>(() => {})
     if (heldState) {
       heldState = false
+      world.stateHeld = true
+      changed()
       await stateReleased
     }
     world.state.set(`${e.plugin}/${e.key}`, e.value)
