@@ -31,8 +31,12 @@ const VERIFY: readonly RegExp[] = [
 const INDENTED = 'indented'
 const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/
 
-/** `fence`: the line is a code fence itself. `indent`: the fence's, on the lines inside it. `inList`: a list was open when this line began. */
-type Line = { text: string; number: number; code?: { lang: string; fence?: true; indent?: number }; inList?: boolean }
+/**
+ * `fence`: the line is a code fence itself. `indent`: the fence's, on the lines
+ * inside it. `inList`: a list was open when this line began. `afterText`: the line
+ * before it was text, not blank or code.
+ */
+type Line = { text: string; number: number; code?: { lang: string; fence?: true; indent?: number }; inList?: boolean; afterText?: boolean }
 
 /** A step and the lines that belong to it, for placing commands under steps. */
 type Span = { step: ParsedStep; end: number }
@@ -69,12 +73,13 @@ function body(text: string): { text: string; number: number }[] {
  * Marks each line inside a code block: fenced, whatever the fence's indent, with
  * the block's language, or indented four spaces after a blank line. Inside a list
  * those indented lines are the item's own paragraphs, so they stay text and their
- * rules count. A list ends at the first other line at column 0, as in listSteps.
+ * rules count. A list keeps its own indent, and ends as `endsList` says.
  */
 function classify(lines: { text: string; number: number }[]): Line[] {
   let fence: { marker: string; lang: string; indent: number } | undefined
-  let inList = false
+  let listIndent: number | undefined
   let codeMayStart = true
+  let afterText = false
   return lines.map(line => {
     if (!fence) {
       const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)(.*)$/.exec(line.text)
@@ -82,14 +87,16 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       if (open?.[1] && !(open[1].startsWith('`') && open[3]?.includes('`'))) {
         fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase(), indent: line.text.search(/\S/) }
         codeMayStart = false
+        afterText = false
         return { ...line, code: { lang: '', fence: true } }
       }
       const blank = line.text.trim() === ''
-      if (!blank && !inList && codeMayStart && /^(?: {4}|\t)/.test(line.text)) return { ...line, code: { lang: INDENTED } }
+      if (!blank && listIndent === undefined && codeMayStart && /^(?: {4}|\t)/.test(line.text)) return { ...line, code: { lang: INDENTED } }
       codeMayStart = blank
-      const marked = inList ? { ...line, inList } : line
-      if (LIST_ITEM.test(line.text)) inList = true
-      else if (!blank && !/^\s/.test(line.text)) inList = false
+      const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}) }
+      afterText = !blank
+      if (LIST_ITEM.test(line.text)) listIndent = Math.min(listIndent ?? Number.POSITIVE_INFINITY, line.text.search(/\S/))
+      else if (listIndent !== undefined && endsList(marked, listIndent)) listIndent = undefined
       return marked
     }
     const current = fence
@@ -107,6 +114,18 @@ function classify(lines: { text: string; number: number }[]): Line[] {
 const ORDERED = /^(\s*)\d+[.)]\s+(.*)$/
 const CHECKLIST = /^(\s*)[-*+]\s+\[[ xX]\]\s+(.*)$/
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/
+const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
+
+/**
+ * Whether a line that isn't a list item ends a list at this indent. It has to sit
+ * at that indent or further out. Text straight after other text is a lazy
+ * continuation and belongs to the item, unless it's a heading or a thematic break.
+ */
+function endsList(line: Line, listIndent: number): boolean {
+  const indent = line.text.search(/\S/)
+  if (indent === -1 || indent > listIndent) return false
+  return !line.afterText || HEADING.test(line.text) || THEMATIC_BREAK.test(line.text)
+}
 
 function title(raw: string): string {
   const plain = raw
@@ -146,8 +165,8 @@ function headingSteps(lines: Line[]): Span[] | undefined {
 /**
  * The first top-level list of this kind, whose first item's indent, up to 3
  * spaces, is the top level. An indented item inside another list is nested in it.
- * The list runs across blank lines, deeper lines and code blocks, and ends at the
- * first other line at its top level or further out.
+ * The list runs across blank lines, deeper lines and code blocks, and ends at a
+ * marker of another kind at its top level or further out, or as `endsList` says.
  */
 function listSteps(lines: Line[], item: RegExp, kind: ParsedStep['kind']): Span[] | undefined {
   const itemIn = (line: Line): { indent: number; text: string } | undefined => {
@@ -168,7 +187,7 @@ function listSteps(lines: Line[], item: RegExp, kind: ParsedStep['kind']): Span[
     const found = itemIn(line)
     if (found && found.indent < top + 2) items.push({ title: title(found.text), index })
     else if (kind === 'checklist' && /^\s*[-*+]\s/.test(line.text)) continue // a plain bullet among the boxes
-    else if (!line.code && line.text.trim() !== '' && line.text.search(/\S/) <= top) {
+    else if (!line.code && (LIST_ITEM.test(line.text) ? line.text.search(/\S/) <= top : endsList(line, top))) {
       last = index
       break
     }

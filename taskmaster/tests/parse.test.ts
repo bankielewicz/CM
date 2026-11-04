@@ -638,3 +638,45 @@ test('only an odd number of trailing backslashes continues a line', () => {
   expect(commandsIn(shell('cargo test \\', '--all'))).toEqual(['cargo test --all'])
   expect(commandsIn(shell('cargo test \\\\\\', '--all'))).toEqual(['cargo test \\\\ --all'])
 })
+
+const rulesIn = (body: string): string[] => parseSkill(skill(body), {}).rules.map(rule => rule.kind)
+
+test("a paragraph after a blank line, at or left of a list's own indent, ends the list", () => {
+  expect(titles('  - Overview\n\n  A paragraph outside the list.\n\n  1. Setup\n  2. Verify')).toEqual(['Setup', 'Verify'])
+  expect(titles('  - Overview\n\nA paragraph outside the list.\n\n  1. Setup\n')).toEqual(['Setup'])
+  expect(rulesIn('  - Overview\n\n  A paragraph.\n\n    You MUST x\n')).toEqual([])
+  expect(titles('1. a\n\n   para\n\nnot lazy\n2. b\n')).toEqual(['a'])
+})
+
+test('a paragraph deeper than its list stays in it', () => {
+  expect(titles('  - Overview\n\n    more of it\n\n  1. nested under it\n')).toEqual([])
+  expect(rulesIn('- a\n\n  more of it\n\n    You MUST x\n')).toEqual(['MUST'])
+})
+
+test('an outdented item moves the list to its indent', () => {
+  expect(rulesIn('  - a\n- b\n\n  deeper than b\n\n    You MUST x\n')).toEqual(['MUST'])
+})
+
+test('a line straight after an item is a lazy continuation, and belongs to the item', () => {
+  expect(rulesIn('- a\nlazy\n\n    You MUST x\n')).toEqual(['MUST'])
+  expect(titles('1. a\nlazy\n2. b\n')).toEqual(['a', 'b'])
+  expect(titles('  1. a\n  lazy\n  2. b\n')).toEqual(['a', 'b'])
+  expect(titles('- [ ] a\nlazy\n- [ ] b\n')).toEqual(['a', 'b'])
+})
+
+test("a line straight after an item's own paragraph is lazy too", () => {
+  expect(titles('1. a\n\n   para\nlazy\n2. b\n')).toEqual(['a', 'b'])
+})
+
+test('a heading or thematic break is never lazy, while a deeper one stays in the list', () => {
+  expect(rulesIn('- a\n## Next\n\n    You MUST x\n')).toEqual([])
+  expect(titles('1. a\n## Next\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n---\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n___\n2. b\n')).toEqual(['a'])
+  expect(rulesIn('- a\n  ## Sub\n\n    You MUST x\n')).toEqual(['MUST'])
+})
+
+test('a line straight after a code block is not lazy', () => {
+  expect(titles('1. Run:\n```bash\npytest\n```\nThen this.\n2. b\n')).toEqual(['Run:'])
+  expect(rulesIn('- a\n```\nx\n```\nThen this.\n\n    You MUST x\n')).toEqual([])
+})
