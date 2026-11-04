@@ -1,19 +1,32 @@
 // Taskmaster: holds Claude to the workflow of the skill it loads (see
-// docs/taskmaster-plan.md). This is the P1.0 scaffold: it reads its settings,
-// builds the engine table at session.start, and runs the startup self-check.
-// Every hook passes its event on unchanged, and nothing is shown.
+// docs/taskmaster-plan.md). So far: it reads its settings, builds the engine
+// table at session.start, runs the startup self-check (P1.0), and records each
+// skill as it loads with the loop it belongs to (P1.1). Every hook passes its
+// event on unchanged, and nothing is shown.
 
+import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { Io, WatchedEvent } from '../types'
+import type { Io, SkillCapture, WatchedEvent } from '../types'
 import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
+import { contentHash, keepLatest, reason, SaveQueue, SKILLS_SHAPE, SkillTracker, UNATTRIBUTED } from './skills'
+
+// The skills loaded this session, newest last. In $.state, which a hot reload keeps.
+const skillsAtom = atom({ plugin: 'taskmaster', key: 'skills' } as const, [] as SkillCapture[], { shape: SKILLS_SHAPE })
 
 export const register: Register = (on, options) => {
   // Module state starts over on a hot reload. The self-check's record is in
   // $.store, which a reload keeps, and each save merges with it.
   const config = parseConfig(options)
   const selfCheck = new SelfCheck()
+  const skills = new SkillTracker()
+  const saves = new SaveQueue()
+  // The captures so far, read once from $.state and emptied at each session.end.
+  // Only this module writes them, so a plain write needs no compare-and-set. That
+  // also keeps it clear of `update`, which retries on a read the docs say is one
+  // moment per dispatch. It's current once `saves` is idle, not when a hook answers.
+  let captured: SkillCapture[] | undefined
 
   // Notes an event for the self-check. It never waits on the store.
   const seen = (event: WatchedEvent): void => selfCheck.note(event)
@@ -37,18 +50,102 @@ export const register: Register = (on, options) => {
 
   // The observers: each notes its event and passes it on unchanged. The engine
   // takes only a function literal as a hook, so each is written out here.
-  on('session.end', (_, e, next) => { seen('session.end'); return next(e) })
+  // A /clear or a resume ends the conversation and carries on in this process, with
+  // no session.start, so the captures start over here. Queued, so saves from before
+  // it land first and skills loaded after it land behind it. The held list is what
+  // matters: a save re-reads $.state only while it's undefined, so it's never set
+  // back to that. The write keeps a later hot reload or another reader from seeing
+  // the old list, and if it fails the held list is still empty.
+  on('session.end', ($, e, next) => {
+    seen('session.end')
+    saves.add(async () => {
+      captured = []
+      try {
+        await $.state.set({ plugin: 'taskmaster', key: 'skills' }, { shape: SKILLS_SHAPE, value: [] })
+      } catch (error) {
+        $.ui.log(`taskmaster: couldn't clear the recorded skills: ${reason(error)}`, { to: 'debug' })
+      }
+    })
+    return next(e)
+  })
   on('session.compact', (_, e, next) => { seen('session.compact'); return next(e) })
-  on('prompt.submit', (_, e, next) => { seen('prompt.submit'); return next(e) })
   on('turn.start', (_, e, next) => { seen('turn.start'); return next(e) })
-  on('turn.complete', (_, e, next) => { seen('turn.complete'); return next(e) })
-  on('tool.call', (_, e, next) => { seen('tool.call'); return next(e) })
+  on('turn.complete', (_, e, next) => { seen('turn.complete'); skills.acted(e.agentId); return next(e) })
+  on('tool.call', (_, e, next) => { seen('tool.call'); skills.acted(e.agentId); return next(e) })
   on('tool.check', (_, e, next) => { seen('tool.check'); return next(e) })
-  on('skill.prompt', (_, e, next) => { seen('skill.prompt'); return next(e) })
-  on('agent.spawn', (_, e, next) => { seen('agent.spawn'); return next(e) })
   on('classic.SessionStart', (_, e, next) => { seen('classic.SessionStart'); return next(e) })
   on('classic.PreCompact', (_, e, next) => { seen('classic.PreCompact'); return next(e) })
   on('classic.PostCompact', (_, e, next) => { seen('classic.PostCompact'); return next(e) })
   on('classic.Stop', (_, e, next) => { seen('classic.Stop'); return next(e) })
   on('classic.TaskCompleted', (_, e, next) => { seen('classic.TaskCompleted'); return next(e) })
+  on('classic.SubagentStop', (_, e, next) => { seen('classic.SubagentStop'); skills.acted(e.agent_id); return next(e) })
+  // A streaming event, so its hook must be an async generator. An agent's preloads
+  // are in place before its first model request, so that request ends its window.
+  // Not its turn.start, which fires before the preload (seen live on 2.1.318).
+  on('turn.step', async function* (_, e, next) {
+    seen('turn.step')
+    skills.acted(e.agentId)
+    return yield* next(e)
+  })
+
+  // P1.1: what is open when a skill loads says which loop it belongs to.
+  on('tool.call', { tool: 'Skill' }, async (_, e, next) => {
+    skills.skillCallOpened(e.tool_use_id, e.skill, e.agentId)
+    try {
+      return await next(e)
+    } finally {
+      skills.skillCallClosed(e.tool_use_id)
+    }
+  })
+
+  on('prompt.submit', async (_, e, next) => {
+    seen('prompt.submit')
+    const typed = e.command ? skills.typedOpened(e.command.name) : undefined
+    try {
+      return await next(e)
+    } finally {
+      if (typed !== undefined) skills.typedClosed(typed)
+      skills.promptEnded()
+    }
+  })
+
+  on('agent.spawn', async (_, e, next) => {
+    seen('agent.spawn')
+    const spawned = await next(e)
+    // No preload window for these. A teammate in its own pane and a workflow's
+    // remote agent fire nothing here to close one, and preloads come before an
+    // agent's first turn, not on a resume.
+    if (typeof spawned.agentId === 'string' && !e.isTeammate && !e.workflow && !e.resume) skills.spawned(spawned.agentId)
+    return spawned
+  })
+
+  on('skill.prompt', ($, e, next) => {
+    seen('skill.prompt')
+    // Worked out first: the windows that say who loaded it are open now.
+    const { loop, via } = e.frontmatter.context === 'fork' ? UNATTRIBUTED : skills.attribute(e.skill)
+    // Saved after the hook answers: the engine holds the skill's load, and the
+    // agent's first model request, until this hook does.
+    saves.add(async () => {
+      try {
+        const capture: SkillCapture = {
+          skill: e.skill,
+          frontmatter: e.frontmatter,
+          ...(e.frontmatterProblem === undefined ? {} : { frontmatterProblem: e.frontmatterProblem }),
+          source: e.source,
+          ...(e.pluginName === undefined ? {} : { pluginName: e.pluginName }),
+          ...(e.path === undefined ? {} : { path: e.path }),
+          hash: await contentHash(e.text),
+          loop,
+          via,
+          at: await $.clock.now(),
+        }
+        captured = keepLatest(captured ?? (await read($, skillsAtom)), capture)
+        await $.state.set({ plugin: 'taskmaster', key: 'skills' }, { shape: SKILLS_SHAPE, value: captured })
+      } catch (error) {
+        // A skill that can't be recorded still loads. Later tasks treat it as unknown.
+        $.ui.log(`taskmaster: couldn't record skill ${e.skill}: ${reason(error)}`, { to: 'debug' })
+      }
+    })
+    return next(e)
+  })
 }

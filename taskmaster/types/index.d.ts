@@ -36,6 +36,7 @@ export type WatchedEvent =
   | 'classic.PreCompact'
   | 'classic.SessionStart'
   | 'classic.Stop'
+  | 'classic.SubagentStop'
   | 'classic.TaskCompleted'
   | 'prompt.submit'
   | 'session.compact'
@@ -46,6 +47,7 @@ export type WatchedEvent =
   | 'tool.check'
   | 'turn.complete'
   | 'turn.start'
+  | 'turn.step'
 
 /**
  * What the self-check keeps in `$.store`, one record per Claude Code build:
@@ -69,4 +71,46 @@ export type Io = {
   version: () => Promise<string>
   storeGet: (key: string) => Promise<unknown>
   storeSet: (key: string, value: unknown) => Promise<void>
+}
+
+/** Which loop a skill belongs to: the main loop, a subagent, or one the mod couldn't tell (P1.1). */
+export type SkillLoop = { kind: 'main' } | { kind: 'agent'; agentId: string } | { kind: 'unknown' }
+
+/**
+ * How the loop was worked out: an open Skill tool call, a typed `/name` being
+ * submitted, a subagent just spawned with the skill preloaded, or none of them.
+ */
+export type SkillVia = 'skill-tool' | 'typed' | 'agent-preload' | 'unattributed'
+
+/**
+ * A skill as it loaded (plan F1.1): what `skill.prompt` gave, a content hash, and
+ * its loop. Not its text, which can hold the words of a typed command: a hook has
+ * that as `e.text`, and later the file at `path` has the skill itself.
+ */
+export type SkillCapture = {
+  skill: string
+  frontmatter: Readonly<Record<string, unknown>>
+  frontmatterProblem?: string
+  source: string
+  pluginName?: string
+  path?: string
+  /**
+   * SHA-256 of the text as `skill.prompt` gave it, as hex. It changes with the
+   * skill's folder and with every argument, so it isn't a cache key: P1.4 and
+   * P1.15 hash the body.
+   */
+  hash: string
+  loop: SkillLoop
+  via: SkillVia
+  /** When it was recorded, just after it loaded, from `$.clock.now()`. */
+  at: number
+}
+
+declare module 'claude-code' {
+  interface PluginState {
+    taskmaster: {
+      /** The skills loaded this session, newest last, at most 20. */
+      skills: Shaped<SkillCapture[]>
+    }
+  }
 }
