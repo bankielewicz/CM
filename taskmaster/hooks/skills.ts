@@ -102,16 +102,17 @@ export class SkillTracker {
   }
 
   attribute(skill: string): Attribution {
-    const calls = [...this.skillCalls.values()].filter(call => sameSkill(call.skill, skill))
-    if (calls.length > 0) {
-      const loops = new Set(calls.map(call => loopKey(call.loop)))
-      return loops.size === 1 && calls[0] ? { loop: calls[0].loop, via: 'skill-tool' } : UNATTRIBUTED
-    }
-    if ([...this.typed.values()].some(name => sameSkill(name, skill))) return { loop: MAIN, via: 'typed' }
-    if (this.starting.size === 1) {
-      const [agentId] = this.starting
-      if (agentId) return { loop: { kind: 'agent', agentId }, via: 'agent-preload' }
-    }
-    return UNATTRIBUTED
+    const claims: Attribution[] = [
+      ...[...this.skillCalls.values()]
+        .filter(call => sameSkill(call.skill, skill))
+        .map((call): Attribution => ({ loop: call.loop, via: 'skill-tool' })),
+      ...[...this.typed.values()]
+        .filter(name => sameSkill(name, skill))
+        .map((): Attribution => ({ loop: MAIN, via: 'typed' })),
+      // Any starting agent could be preloading it: no event names an agent's preloads.
+      ...[...this.starting].map((agentId): Attribution => ({ loop: { kind: 'agent', agentId }, via: 'agent-preload' })),
+    ]
+    const loops = new Set(claims.map(claim => loopKey(claim.loop)))
+    return loops.size === 1 && claims[0] ? claims[0] : UNATTRIBUTED
   }
 }

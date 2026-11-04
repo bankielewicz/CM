@@ -451,3 +451,56 @@ test('what an earlier version kept, with its text, is read as absent', async ($,
   expect(all.map(capture => capture.skill)).toEqual(['new'])
   expect(JSON.stringify(world.state.get('taskmaster/skills'))).not.toContain(SECRET)
 })
+
+// ------------------------------------------ when two loops could claim a skill
+
+const NOBODY = { loop: { kind: 'unknown' }, via: 'unattributed' }
+
+test('another loop\'s open Skill call and a typed command for one skill leave it unattributed', async ($, on) => {
+  const world = engine(on, {
+    during: {
+      toolCall: e => (e.tool === 'Skill' ? typed($, 'notes') : Promise.resolve()),
+      promptSubmit: () => expand($),
+    },
+  })
+  await start($)
+  await $.tool.call({ tool: 'Skill', skill: 'notes', agentId: 'agent-1' })
+
+  expect((await only($, world)).via).toBe('unattributed')
+})
+
+test('an open Skill call and an agent that could be preloading the skill leave it unattributed', async ($, on) => {
+  const world = engine(on, {
+    spawnAgentIds: ['agent-2'],
+    during: { toolCall: e => (e.tool === 'Skill' ? expand($) : Promise.resolve()) },
+  })
+  await start($)
+  await spawn($)
+  await $.tool.call({ tool: 'Skill', skill: 'notes' })
+
+  expect((await only($, world)).loop).toEqual({ kind: 'unknown' })
+})
+
+test('a typed command and a starting agent leave a skill unattributed', () => {
+  const tracker = new SkillTracker()
+  tracker.typedOpened('notes')
+  tracker.spawned('agent-2')
+
+  expect(tracker.attribute('notes')).toEqual(NOBODY)
+})
+
+test('a Skill call and a typed command on one loop agree, and the Skill call names the path', () => {
+  const tracker = new SkillTracker()
+  tracker.typedOpened('notes')
+  tracker.skillCallOpened('toolu_1', 'notes', undefined)
+
+  expect(tracker.attribute('notes')).toEqual({ loop: { kind: 'main' }, via: 'skill-tool' })
+})
+
+test('an agent\'s own Skill call and its own start agree', () => {
+  const tracker = new SkillTracker()
+  tracker.spawned('agent-1')
+  tracker.skillCallOpened('toolu_1', 'notes', 'agent-1')
+
+  expect(tracker.attribute('notes')).toEqual({ loop: { kind: 'agent', agentId: 'agent-1' }, via: 'skill-tool' })
+})
