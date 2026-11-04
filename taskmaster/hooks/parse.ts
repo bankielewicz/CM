@@ -127,11 +127,17 @@ function endsList(line: Line, listIndent: number): boolean {
   return !line.afterText || HEADING.test(line.text) || THEMATIC_BREAK.test(line.text)
 }
 
+/** A paired run of backticks, of any length, around a code span. */
+const CODE_SPAN = /(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)/g
+
+/** A title without its Markdown marks. Code spans are held aside first, so their contents stay literal. */
 function title(raw: string): string {
+  const spans: string[] = []
   const plain = raw
-    .replace(/`([^`]*)`/g, '$1')
+    .replace(CODE_SPAN, (_span, _run, code: string) => `\0${spans.push(code) - 1}\0`)
     .replace(/(\*\*|__)(.+?)\1/g, '$2')
     .replace(/(^|\W)[*_](.+?)[*_](?=\W|$)/g, '$1$2')
+    .replace(/\0(\d+)\0/g, (held, index: string) => spans[Number(index)] ?? held)
     .trim()
   return plain.slice(0, TITLE_MAX)
 }

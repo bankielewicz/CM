@@ -680,3 +680,22 @@ test('a line straight after a code block is not lazy', () => {
   expect(titles('1. Run:\n```bash\npytest\n```\nThen this.\n2. b\n')).toEqual(['Run:'])
   expect(rulesIn('- a\n```\nx\n```\nThen this.\n\n    You MUST x\n')).toEqual([])
 })
+
+test('code spans stay literal in a title, while emphasis around them goes', () => {
+  const body = `1. Edit \`__init__.py\`
+2. Run \`__tests__\`
+3. Use \`*a*\` here
+4. **Run \`npm test\`**
+5. \`\`a\`b\`\` and \`_c_\`
+6. a \` stray *b*
+`
+  expect(titles(body)).toEqual(['Edit __init__.py', 'Run __tests__', 'Use *a* here', 'Run npm test', 'a`b and _c_', 'a ` stray b'])
+})
+
+test('the title cap counts the code span, not what stood in for it', () => {
+  expect(titles(`1. ${'a'.repeat(115)} \`${'b'.repeat(20)}\`\n`)).toEqual([`${'a'.repeat(115)} bbbb`])
+})
+
+test("text that looks like what stands in for a code span is left alone", () => {
+  expect(titles('1. \u00009\u0000 x\n')).toEqual(['\u00009\u0000 x'])
+})
