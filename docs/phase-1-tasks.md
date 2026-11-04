@@ -76,20 +76,34 @@ Report the commands with their output. `main` is protected, so each task (or a s
   Step 2 waits for PR #7 to merge. Removing the entry while `spike/` exists fails `mod-coverage`, because the spike is at 61.58% (`printMod()` in `scripts/mod-coverage.mjs`).
 
 ## M1. Contract compiler (F1)
-- [x] P1.1 **Capture and attribute** (F1.1). **Done: PR #8.** On `skill.prompt`, capture the skill, its text, frontmatter, source, plugin name, path and a content hash. Attribute it to a loop: through the `Skill` tool's `tool.call.agentId`, through `agent.spawn` for preloaded skills, or to the main loop for a typed `/name` (spike: `skill-attribution`). **Red:** one test per attribution path. *Depends on P1.0.*
+- [x] P1.1 **Capture and attribute** (F1.1). **Done: PR #8.** On `skill.prompt`, capture the skill, frontmatter, source, plugin name, path and a content hash. Attribute it to a loop: through the `Skill` tool's `tool.call.agentId`, through `agent.spawn` for preloaded skills, or to the main loop for a typed `/name` (spike: `skill-attribution`). **Red:** one test per attribution path. *Depends on P1.0.*
   **Status (2026-11-04):**
-  - `hooks/skills.ts` captures each skill into `$.state` (`taskmaster.skills`, the newest 20), with a SHA-256 of its text and its loop. 20 new tests; coverage stays at 100% of lines and functions.
-  - **Attribution rules, from orders seen live on 2.1.317:**
+  - `hooks/skills.ts` captures each skill into `$.state` (`taskmaster.skills`, the newest 20), with a SHA-256 of its text and its loop, saved after the hook answers. Not the text itself. 29 tests beyond P1.0's 72; coverage stays at 100% of lines and functions.
+  - **Attribution, from orders seen live.** Each of these can claim a skill. One loop gets it, and two leave it `unattributed`:
     1. An open `Skill` call whose `skill` matches: `skill.prompt` fires inside the call.
     2. An open `prompt.submit` whose `command` matches: a typed `/name` expands inside `prompt.submit`'s `next(e)`, before the main `turn.start`.
-    3. The one agent whose spawn has answered and that hasn't yet made a tool call or ended its turn: a preloaded skill expands after `agent.spawn` resolves, not while it's open.
-    4. Otherwise `unattributed`. That includes two loops claiming the same skill, or two agents starting at once.
+    3. An agent whose spawn has answered and that hasn't reached its first model request: a preloaded skill expands just after `agent.spawn` resolves, and before that request. It has no name to match, so it claims any skill for those few milliseconds.
+
+    With no claim, or a forked skill (`context: fork`), it's `unattributed`.
   - **Checked live**, with a probe mod reading `taskmaster.skills`: typed `/notes` gave `main`/`typed`, the model's `Skill` call gave `main`/`skill-tool`, and a registered agent with `notes` preloaded gave that agent's id with `agent-preload`. A `Skill` call inside a subagent is checked only in the kit; the spike saw it live once.
-  - **Mutation checks:** each test fails when its safeguard is removed (closing a `Skill` call or typed command, ending the preload window at a tool call or turn end, starting it at a spawn, the ambiguity rule). The `catch` around the capture can't be seen in the kit: a hook that throws is skipped, and the skill passes on either way.
+  - **Mutation checks:** each test fails when its safeguard is removed, 23 mutants in the review round below.
+  - **Review round** (PR #8, `/code-review` of `0a4ae95` with Codex's one comment, 2026-11-04):
+    - **#1, #4 (Codex's P2):** `attribute()` returned on the first window that matched. It now weighs all three.
+    - **#2:** a skill can't be checked against an agent's preloads, because `agent.spawn`, `$.agent.list` and `agent.offer` don't carry the list. It's a stated limit, and a test pins it.
+    - **#3:** the window ends at the agent's first `turn.step`, its `classic.SubagentStop` and each `prompt.submit`, as well as its first tool call and turn end. A teammate, a workflow agent and a resumed run open none.
+    - **#5:** the save runs in a queue after the hook answers, because the engine holds a skill's load until `skill.prompt`'s hooks answer.
+    - **#6: didn't reproduce.** On 2.1.318, six overlapping `update` calls all landed. The save uses a plain `$.state.set` anyway (plan §9).
+    - **#7:** a failed capture writes one debug line, and shows nothing.
+    - **#8:** the capture keeps no text. Stripping the `ARGUMENTS` block wouldn't be enough, because `$ARGUMENTS` puts the words in the body.
+    - **#9:** the `hash` comment no longer calls it a cache key.
+    - **#10:** see "Before merging".
+    - **Found while fixing:** a forked skill got the caller's loop, confirmed live, so it stays unattributed. And `failStateWrites` never failed a write, so `failClock` replaces it.
+    - **Limits:** an agent killed before any closing event stays a claim until the next prompt; a live attempt to test a kill didn't get that far. A rejecting `$.state.set` can't be tested in the kit, which answers beneath it. The self-check shows that `turn.step` fired, not when, so event order needs a live recheck after a Claude Code update (plan §9).
+  - **Before merging:** the owner runs the interactive-terminal check on this PR (owner's decision, 2026-11-04), and it's recorded here as for P1.0. P1.2 and P1.3 are treated the same.
 - [ ] P1.2 **Deterministic parse** (F1.2). Name, description, and the `allowed-tools`, `context: fork` and `disable-model-invocation` frontmatter keys. Numbered or ordered lists, "Step N" headings, `- [ ]` checklists, MUST/NEVER/ALWAYS lines, and test, lint or build commands in code fences (candidate verify commands). **Red:** fixtures for a numbered workflow, a checklist skill, and a reference skill that yields no steps. *Depends on P1.1.*
 - [ ] P1.3 **Frontmatter and overrides** (F1.7, F1.9). Parse and schema-validate the `taskmaster:` block, and read `.taskmaster/overrides/<skill>.yaml`. Precedence is frontmatter, then override, then LLM, then heuristics (principle 1). **Red:** invalid frontmatter falls back with a logged reason, and an override beats extraction. *Depends on P1.2.*
 - [ ] P1.4 **Cached extraction and enforcement level** (F1.3, F1.4). One Haiku call returns JSON that is validated against a schema and cached in `$.store` by path + hash. If the call fails, the F1.2 result is used. The level is `enforce`, `advisory` or `none`: `none` for reference and persona skills and for `exemptSkills`. **Red:**
-  - **The cache key** (found in P1.1, checked live on 2.1.317). `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, and a typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. So P1.1's capture `hash` changes with the skill's folder and with every argument. Key the cache on a hash of the body alone (header and `ARGUMENTS` block removed), with the path, or on the file's own content.
+  - **The cache key** (found in P1.1, checked live on 2.1.317). `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, and a typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. So P1.1's capture `hash` changes with the skill's folder and with every argument. Key the cache on a hash of the body alone (header and `ARGUMENTS` block removed), with the path, or on the file's own content. A skill whose body has `$ARGUMENTS` takes the words into the body, where they can't be stripped (seen live on 2.1.318), so only the file's content is stable for those. The capture keeps no text, so take it from `e.text` in the hook.
   - a second load of the same hash makes no model call,
   - a failed call yields the F1.2 result as `advisory`,
   - high confidence that disagrees with the parse stays `advisory`.
