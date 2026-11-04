@@ -1,6 +1,6 @@
 # <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg"><img src="docs/assets/hero-light.svg" width="760" alt="Taskmaster: a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. Planned, not installable yet."></picture>
 
-**Planned, not installable yet.** Taskmaster is a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. It isn't built, and there's no install command. This repository holds its design and a Phase 0 spike that tested whether the design can work. That go/no-go check, Gate A, passed on 2026-11-03, so the first version (Phase 1) is next. Everything below describes what's planned.
+**Planned, not installable yet.** Taskmaster is a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. It isn't built, and there's no install command. This repository holds its design and the first version (Phase 1) as it's built. A Phase 0 spike tested whether the design can work. That go/no-go check, Gate A, passed on 2026-11-03, and the spike was then deleted. Everything below describes what's planned.
 
 Taskmaster's promise: Claude never silently skips a declared step, never claims completion without matching evidence, and never loses its place across compaction or a new session.
 
@@ -94,7 +94,7 @@ A skill's steps become tasks. Taskmaster records what happens, checks that recor
 
 | Stage | What it holds | State |
 | --- | --- | --- |
-| Phase 0: spike | An observe-only mod with one-shot probes that tests whether the design can work | Built. Gate A passed (GO, 2026-11-03) |
+| Phase 0: spike | An observe-only mod with one-shot probes that tested whether the design can work | Done. Gate A passed (GO, 2026-11-03); the record is in plan §10.1, and the spike was deleted |
 | Phase 1: first version | Steps from the skill, the evidence record, gates on completing or deleting a task and on stopping, recorded skips, checkpoints and resume, the status line and summary, metrics, and the frontmatter advisor for one skill | In progress: the scaffold is built ([task list](docs/phase-1-tasks.md)) |
 | Phase 2 onward | Holding Claude to a plan before it writes, subagent enforcement, warnings for unrequested work, an advisory audit, a side pane, and marketplace install | Planned |
 
@@ -104,26 +104,24 @@ The thresholds in the design plan are targets for a later trial, not results.
 
 ### Prerequisites
 
-- The Claude Code CLI. CI pins 2.1.317, the build the spike was checked against.
+- The Claude Code CLI. CI pins 2.1.317, the build the mod is written against.
 - Node.js 22 or later and npm, for the coverage tools only. CI uses Node.js 24.
 
-### Run the spike
+### Run the mod
 
-Run these from the repository root.
+Run these from the repository root. So far the mod is the P1.0 scaffold: it reads its settings and runs a startup self-check, and shows nothing.
 
-1. Run the spike's tests. The last lines give the pass and fail counts.
-
-   ```bash
-   claude plugin test spike/taskmaster-spike
-   ```
-
-2. Start a session with the spike loaded.
+1. Run the mod's tests. The last lines give the pass and fail counts.
 
    ```bash
-   claude --plugin-dir ./spike/taskmaster-spike
+   claude plugin test taskmaster
    ```
 
-3. In that session, run `/tm-spike status` to list the Gate A checks. The [runbook](spike/taskmaster-spike/RUNBOOK.md) covers the full run.
+2. Start a session with the mod loaded. From a terminal, the flag reloads the mod when you edit it.
+
+   ```bash
+   claude --plugin-dir ./taskmaster
+   ```
 
 ### Develop a mod
 
@@ -138,7 +136,7 @@ npm run coverage
 
 It prints `PASS`, `FAIL` or `EXEMPT` for each mod with its line and function coverage, and exits 1 if any mod fails.
 
-A mod listed in [`coverage-exempt.json`](coverage-exempt.json) is excused from the percentage, but its tests must still pass. The spike is listed there because it predates the bar.
+A mod listed in [`coverage-exempt.json`](coverage-exempt.json) is excused from the percentage, but its tests must still pass. No mod is exempt now. The spike's entry stays until the owner removes it, and the gate ignores it, because the spike is gone.
 
 The `mod-coverage` check runs from the pull request's own files, so a separate `gate-guard` check fails any pull request that changes the gate's own files: `coverage-exempt.json`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `.npmrc`, `scripts/`, `.github/workflows/` and Claude Code's project settings. It runs from the base branch, so a pull request can't change it for itself. To change the gate on purpose, the repository owner lifts that check in the ruleset for the merge.
 
@@ -146,29 +144,10 @@ Claude Code's project settings also deny Claude edits to those files and `gh pr 
 
 The gate reads its numbers from what tests print, so a test written to print fake counters would pass. Review changes to tests with that in mind.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/spike-coverage-dark.svg">
-  <img src="docs/assets/spike-coverage-light.svg" width="760" alt="Bar chart of the spike's line coverage by file against the 95% bar: checks.ts 100%, journal.ts 77.08%, util.ts 71.42%, register.tsx 57.14%. Overall 61.58%, 404 of 656 lines.">
-</picture>
-
-<details>
-<summary>The chart's numbers as a table</summary>
-
-| File | Line coverage | Lines covered |
-| --- | --- | --- |
-| `checks.ts` | 100% | 41 of 41 |
-| `journal.ts` | 77.08% | 37 of 48 |
-| `util.ts` | 71.42% | 10 of 14 |
-| `register.tsx` | 57.14% | 316 of 553 |
-| All spike code | 61.58% | 404 of 656 |
-
-</details>
-
 ## Documentation
 
 - [Design plan](docs/taskmaster-plan.md): the features, the build order and the go/no-go gates.
-- [Spike runbook](spike/taskmaster-spike/RUNBOOK.md): how to run each probe and read its result.
-- [Gate A checklist](spike/taskmaster-spike/GATE-A-TASKS.md): the spike's finished run, with the evidence for each check. The result is in plan §10.1.
+- Gate A: the result is in plan §10.1. The spike's [runbook](https://github.com/bankielewicz/CM/blob/d46b356/spike/taskmaster-spike/RUNBOOK.md) and [checklist](https://github.com/bankielewicz/CM/blob/d46b356/spike/taskmaster-spike/GATE-A-TASKS.md), with the evidence for each check, are kept in git history.
 - [Phase 1 task list](docs/phase-1-tasks.md): the tasks for the first version, in build order.
 - [`CLAUDE.md`](CLAUDE.md): commands, architecture and the test-first workflow.
 - [Changelog](CHANGELOG.md): notable changes.
