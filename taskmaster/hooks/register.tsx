@@ -10,7 +10,7 @@ import type { Register } from 'claude-code'
 import type { Io, SkillCapture, WatchedEvent } from '../types'
 import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
-import { contentHash, keepLatest, SaveQueue, SKILLS_SHAPE, SkillTracker } from './skills'
+import { contentHash, keepLatest, reason, SaveQueue, SKILLS_SHAPE, SkillTracker } from './skills'
 
 // The skills loaded this session, newest last. In $.state, which a hot reload keeps.
 const skillsAtom = atom({ plugin: 'taskmaster', key: 'skills' } as const, [] as SkillCapture[], { shape: SKILLS_SHAPE })
@@ -112,8 +112,9 @@ export const register: Register = (on, options) => {
         }
         captured = keepLatest(captured ?? (await read($, skillsAtom)), capture)
         await $.state.set({ plugin: 'taskmaster', key: 'skills' }, { shape: SKILLS_SHAPE, value: captured })
-      } catch {
+      } catch (error) {
         // A skill that can't be recorded still loads. Later tasks treat it as unknown.
+        $.ui.log(`taskmaster: couldn't record skill ${e.skill}: ${reason(error)}`, { to: 'debug' })
       }
     })
     return next(e)

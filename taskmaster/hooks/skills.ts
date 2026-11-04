@@ -53,6 +53,9 @@ export class SaveQueue {
   }
 }
 
+/** What went wrong, for a debug line. */
+export const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
 export type Attribution = { loop: SkillLoop; via: SkillVia }
 
 const MAIN: SkillLoop = { kind: 'main' }

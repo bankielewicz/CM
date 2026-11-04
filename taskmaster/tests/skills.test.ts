@@ -394,3 +394,17 @@ test('saves run one at a time, and idle settles once they have finished', async 
   await idle
   expect(ran).toEqual(['one started', 'one finished', 'two'])
 })
+
+test('a capture that fails leaves one debug line and shows nothing', async ($, on) => {
+  const world = engine(on, { failClock: true })
+  await start($)
+  await expand($)
+  await until(world, () => world.logs.length > 0)
+
+  expect(world.logs).toHaveLength(1)
+  expect(world.logs[0]?.to).toBe('debug')
+  expect(world.logs[0]?.text).toContain('notes')
+  expect(world.logs[0]?.text).toContain('clock.now')
+  expect(world.logs[0]?.text).not.toContain(NOTES_TEXT)
+  expect(world.shown).toEqual([])
+})
