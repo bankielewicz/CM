@@ -463,6 +463,85 @@ test('what an earlier version kept, with its text, is read as absent', async ($,
   expect(JSON.stringify(world.state.get('taskmaster/skills'))).not.toContain(SECRET)
 })
 
+// ------------------------------------------------- when the conversation ends
+
+const CLEAR = { reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } } as const
+
+test('a /clear starts the captures over: only the skill loaded after it is held', async ($, on) => {
+  const world = engine(on)
+  await start($)
+  await expand($, 'before')
+  await $.session.end(CLEAR)
+  await expand($, 'after')
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill)).toEqual(['after'])
+})
+
+test('every session.end starts the captures over, whatever its reason', async ($, on) => {
+  const world = engine(on)
+  await start($)
+  for (const reason of ['resume', 'prompt_input_exit', 'logout', 'other'] as const) {
+    await expand($, 'before')
+    await $.session.end({ ...CLEAR, reason })
+    await expand($, reason)
+    const all = await settled($, world)
+    expect(all.map(capture => capture.skill)).toEqual([reason])
+    await $.session.end(CLEAR)
+  }
+})
+
+test('a list the empty write left behind is not read back: the held list is what starts over', async ($, on) => {
+  const kept = { skill: 'kept', hash: 'abc', loop: { kind: 'main' }, via: 'typed', at: 1 }
+  // $.state survives the /clear, and the reset's own write doesn't land.
+  const world = engine(on, { seedState: { 'taskmaster/skills': { shape: SKILLS_SHAPE, value: [kept] } }, loseFirstStateWrite: true })
+  await start($)
+  await $.session.end(CLEAR)
+  await expand($, 'after')
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill)).toEqual(['after'])
+})
+
+test('session.end empties what $.state holds, in its shape', async ($, on) => {
+  const world = engine(on)
+  await start($)
+  await settled($, world)
+  expect(captures(world)).not.toEqual([])
+  await $.session.end(CLEAR)
+  await until(world, () => captures(world).length === 0)
+
+  expect(world.state.get('taskmaster/skills')).toEqual({ shape: SKILLS_SHAPE, value: [] })
+})
+
+test('saves queued before a /clear land first, and skills loaded after it queue behind the reset', async ($, on) => {
+  const world = engine(on, { holdFirstStateWrite: true })
+  await start($)
+  const writes: string[][] = []
+  world.onChange.push(function watch() {
+    writes.push(captures(world).map(capture => capture.skill))
+    world.onChange.push(watch)
+  })
+  await expand($, 'before')
+  await until(world, () => world.stateHeld)
+  await $.session.end(CLEAR)
+  await expand($, 'after')
+  world.releaseState()
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill)).toEqual(['after'])
+  expect(writes.filter((list, index) => index === 0 || JSON.stringify(list) !== JSON.stringify(writes[index - 1])).slice(0, 4)).toEqual([[], ['before'], [], ['after']])
+})
+
+test('session.end waits on no save, and passes through with the engine\'s answer', { timeoutMs: 3_000 }, async ($, on) => {
+  const world = engine(on, { hangStateWrites: true })
+  await start($)
+
+  const end = await $.session.end(CLEAR)
+  expect(end).toEqual({ sessionId: 'engine-session' })
+  expect(world.reached).toContain('session.end')
+})
+
 // ------------------------------------------ when two loops could claim a skill
 
 const NOBODY = { loop: { kind: 'unknown' }, via: 'unattributed' }
