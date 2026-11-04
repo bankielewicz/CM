@@ -427,3 +427,10 @@ test('an environment prefix may hold a quoted value', () => {
 test('an environment prefix with an unclosed quote gives no candidate', () => {
   expect(commandsIn(shell('A="x npm test'))).toEqual([])
 })
+
+test("a trailing backslash doesn't carry into the next code block", () => {
+  const direct = `${shell('rm -rf build \\')}\n${shell('npm test')}`
+  expect(parseSkill(skill(direct), {}).verifyCandidates).toEqual([{ command: 'npm test', line: BODY_LINE + 5 }])
+  const across = `${shell('rm -rf build \\')}\n\`\`\`python\nprint()\n\`\`\`\n\n${shell('make lint')}`
+  expect(commandsIn(across)).toEqual(['make lint'])
+})

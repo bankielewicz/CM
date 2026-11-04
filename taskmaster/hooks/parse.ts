@@ -210,7 +210,11 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   let heredocs: string[] = []
   for (const line of lines) {
     const fence = /^\s*(`{3,}|~{3,})/.test(line.text)
-    if (fence) heredocs = []
+    if (fence) {
+      // A code block's end ends whatever was still open in it.
+      pending = undefined
+      heredocs = []
+    }
     if (!line.code || !SHELLS.has(line.code.lang) || fence) continue
     if (heredocs.length > 0) {
       // Trimmed, not exact: a block inside a list item indents its terminator too.
