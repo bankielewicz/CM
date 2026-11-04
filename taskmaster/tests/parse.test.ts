@@ -861,6 +861,13 @@ test("tabs count to the next multiple of four, in an item's content and in the l
   expect(rulesIn('-\t\tWork\n\n      You MUST x\n')).toEqual([])
 })
 
+test('a tab before a nested marker counts to the next multiple of four', () => {
+  expect(rulesIn('- a\n\t- b\n\n         You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('- a\n\t- b\n\n          You MUST x\n')).toEqual([])
+  expect(rulesIn('- a\n\t-  b\n\n          You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('- a\n\t-  b\n\n           You MUST x\n')).toEqual([])
+})
+
 test('a heredoc delimiter keeps a substitution whole, as bash reads it literally', () => {
   expect(commandsIn(shell('cat <<$(echo EOF)', 'npm test', '$(echo EOF)', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('cat <<$(x)y', 'npm test', '$(x)y', 'make lint'))).toEqual(['make lint'])
