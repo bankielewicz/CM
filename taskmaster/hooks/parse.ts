@@ -186,7 +186,8 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
     for (const segment of joined.split(/&&|\|\||;/)) {
       const command = segment.trim().replace(/^([A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '')
       if (!VERIFY.some(pattern => pattern.test(command))) continue
-      const span = spans.find(candidate => candidate.step.line <= at && at < candidate.end)
+      // Spans are in text order, so the last that contains the line is the innermost.
+      const span = spans.filter(candidate => candidate.step.line <= at && at < candidate.end).pop()
       // Once per step: a later step that runs the same command keeps its own verify spec.
       const key = `${span?.step.id ?? ''}\n${command}`
       if (seen.has(key)) continue

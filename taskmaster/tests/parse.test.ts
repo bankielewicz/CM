@@ -337,3 +337,18 @@ test('CRLF line endings read the same as LF, with the same line numbers', () => 
     expect(parsed).toEqual(parseSkill(text, {}))
   }
 })
+
+test('a command under a nested step belongs to the innermost step, and to the outer one again once that ends', () => {
+  const body = `## Step 1: Implement
+
+### Step 2: Verify
+
+${shell('npm test')}
+### Details
+
+${shell('npm run lint')}`
+  expect(parseSkill(skill(body), {}).verifyCandidates.map(c => [c.command, c.step])).toEqual([
+    ['npm test', 'S2'],
+    ['npm run lint', 'S1'],
+  ])
+})
