@@ -1,14 +1,18 @@
 // P1.1: capture each skill as it loads, and work out which loop it belongs to
 // (plan F1.1). skill.prompt carries no agentId, so the loop comes from what is
-// open when it fires. These orders were seen live on 2.1.317:
+// open when it fires. These orders were seen live (plan §9):
 // - a Skill tool call: skill.prompt fires while the call is open, in the loop
 //   that made the call (main, or the subagent named by its agentId);
 // - a typed /name: skill.prompt fires inside prompt.submit, before the main
 //   turn starts, and prompt.submit carries the command's name;
-// - a skill preloaded into a subagent: skill.prompt fires after agent.spawn
-//   has answered with the new agent's id, before that agent's first tool call.
-// When none of these fits, or two loops could claim the skill, it stays
+// - a skill preloaded into a subagent: skill.prompt fires just after agent.spawn
+//   has answered with the new agent's id, before that agent's first model request.
+// Each of these can claim a skill. When none does, or two loops do, it stays
 // unattributed: a wrong loop would hold the wrong agent to its steps.
+//
+// Known limit: no event names the skills an agent preloads, so a starting agent
+// claims any skill. One that loads in those few milliseconds with no other claim
+// goes to that agent.
 
 import type { SkillCapture, SkillLoop, SkillVia } from '../types'
 

@@ -632,3 +632,16 @@ test('a prompt forgets which agents have acted, so the list stays small', () => 
 
   expect(tracker.attribute('notes')).toEqual({ loop: { kind: 'agent', agentId: 'agent-2' }, via: 'agent-preload' })
 })
+
+// No event names the skills an agent preloads (agent.spawn, $.agent.list and
+// agent.offer don't carry them), so this can't be told from a real preload.
+test('known limit: a skill nothing else claims, while one agent starts, goes to that agent', async ($, on) => {
+  const world = engine(on, { spawnAgentIds: ['agent-2'] })
+  await start($)
+  await spawn($)
+  await expand($, 'not-one-it-preloads')
+
+  const capture = await only($, world)
+  expect(capture.loop).toEqual({ kind: 'agent', agentId: 'agent-2' })
+  expect(capture.via).toBe('agent-preload')
+})
