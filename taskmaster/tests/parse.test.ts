@@ -412,3 +412,18 @@ test('a here-string, or << in quotes or a comment, opens no heredoc', () => {
 test('a comment is not read for commands, while a # inside a word is not a comment', () => {
   expect(commandsIn(shell('echo a # npm test; make check', 'echo a#b; go vet'))).toEqual(['go vet'])
 })
+
+test('an environment prefix may hold a quoted value', () => {
+  const body = shell(
+    'NODE_OPTIONS="--a --b" npm test',
+    "A='x y' B=1 cargo test",
+    'C="d\\"e f" make lint',
+    'G="h;i" go vet',
+    'J=a"b c"d go build',
+  )
+  expect(commandsIn(body)).toEqual(['npm test', 'cargo test', 'make lint', 'go vet', 'go build'])
+})
+
+test('an environment prefix with an unclosed quote gives no candidate', () => {
+  expect(commandsIn(shell('A="x npm test'))).toEqual([])
+})

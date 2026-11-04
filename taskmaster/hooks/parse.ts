@@ -170,6 +170,8 @@ function rules(lines: Line[]): ParsedRule[] {
 }
 
 const HEREDOC = /^<<(?!<)-?\s*(?:\\|['"])?([A-Za-z_]\w*)/
+/** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
+const ENV_PREFIX = /^(?:[A-Za-z_]\w*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])*\s+)+/
 
 /**
  * One shell line's `&&`, `||` and `;` segments, and the terminators of any
@@ -226,7 +228,7 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
     const shell = readShell(joined)
     heredocs = shell.heredocs
     for (const segment of shell.segments) {
-      const command = segment.trim().replace(/^([A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '')
+      const command = segment.trim().replace(ENV_PREFIX, '')
       if (!VERIFY.some(pattern => pattern.test(command))) continue
       // Spans are in text order, so the last that contains the line is the innermost.
       const span = spans.filter(candidate => candidate.step.line <= at && at < candidate.end).pop()
