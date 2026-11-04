@@ -267,10 +267,6 @@ test('a text with no header, such as a command, is read from its first line', ()
   ])
 })
 
-test('a YAML block at the top of the text is skipped', () => {
-  expect(parseSkill('---\nname: x\n1. not a step\n---\n1. A step\n', {}).steps.map(step => step.title)).toEqual(['A step'])
-})
-
 // ------------------------------------------------------------ frontmatter
 
 test('name, description and the three frontmatter keys are read', () => {
@@ -444,4 +440,13 @@ test('the frame is cut at the first ARGUMENTS block, so typed text can never bec
 
 test('an ARGUMENTS line without two blank lines before it stays in the skill', () => {
   expect(parseSkill(skill('ARGUMENTS: one\nYou MUST keep this.\n\nARGUMENTS: two\nNEVER drop this.\n'), {}).rules.map(rule => rule.kind)).toEqual(['MUST', 'NEVER'])
+})
+
+test('a body opening with a thematic break keeps its steps and rules', () => {
+  const body = '---\n## Step 1: Implement\n\nYou MUST x.\n\n---\n\n## Step 2: Check\n'
+  for (const text of [skill(body), body]) {
+    const parsed = parseSkill(text, {})
+    expect(parsed.steps.map(step => step.title)).toEqual(['Implement', 'Check'])
+    expect(parsed.rules.map(rule => rule.text)).toEqual(['You MUST x.'])
+  }
 })
