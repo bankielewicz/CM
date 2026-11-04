@@ -97,6 +97,42 @@ export type SkillCapture = {
   at: number
 }
 
+/** A step the deterministic parse found (P1.2). */
+export type ParsedStep = {
+  /** `S1`, `S2`, … in document order. */
+  id: string
+  title: string
+  /** Where it came from: a "Step N" or numbered heading, an ordered list item, or a checklist item. */
+  kind: 'heading' | 'numbered' | 'checklist'
+  /** 1-based line in the skill text as `skill.prompt` gave it. */
+  line: number
+}
+
+/** A MUST, NEVER or ALWAYS line outside code (P1.2). */
+export type ParsedRule = { kind: 'MUST' | 'NEVER' | 'ALWAYS'; text: string; line: number }
+
+/** A test, lint, build or typecheck command in a shell code block: a candidate verify spec (P1.2). */
+export type VerifyCandidate = {
+  command: string
+  line: number
+  /** The step whose text holds the command, when there is one. */
+  step?: string
+}
+
+/** What the deterministic parse reads from a skill (plan F1.2): no model, the same answer every time. */
+export type ParsedSkill = {
+  name?: string
+  description?: string
+  allowedTools: string[]
+  /** `context: fork` in the frontmatter. */
+  forked: boolean
+  /** False when the frontmatter has `disable-model-invocation: true`. */
+  modelInvocable: boolean
+  steps: ParsedStep[]
+  rules: ParsedRule[]
+  verifyCandidates: VerifyCandidate[]
+}
+
 declare module 'claude-code' {
   interface PluginState {
     taskmaster: {
