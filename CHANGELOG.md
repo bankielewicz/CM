@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added the `taskmaster` mod's scaffold (P1.0). It reads the Phase 1 settings and runs a startup self-check, which records in `$.store` which of the events it needs fire on each Claude Code build. It's observe-only and shows nothing. A setting outside its range is moved into the range, so it can't switch the mod off. A folder setting inside `.git` falls back to its default.
 - Added skill capture (P1.1). Each skill is recorded as it loads, with a hash of its text and the loop it belongs to: the main loop, or the subagent that loaded it with the Skill tool or had it preloaded.
 - Added the deterministic skill parse (P1.2). It reads steps (from "Step N" or numbered headings, a numbered list, or a checklist), MUST, NEVER and ALWAYS rules, and test, lint and build commands from a skill's text, with no model.
+- Added declared contracts (P1.3). A skill's `taskmaster:` frontmatter block, or its override file `.taskmaster/overrides/<skill>.json`, is checked strictly. An invalid one is set aside whole, with its reason in the debug log.
 
 ### Removed
 

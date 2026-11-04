@@ -80,6 +80,44 @@ export type SkillLoop = { kind: 'main' } | { kind: 'agent'; agentId: string } | 
  */
 export type SkillVia = 'skill-tool' | 'typed' | 'agent-preload' | 'unattributed'
 
+/** How a declared step is checked (plan F1.7): a command and its exit code, files edited, or a tool called. */
+export type VerifySpec = { bash: string; exit: number } | { edits: string } | { tool: string }
+
+export type DeclaredStep = {
+  id: string
+  title: string
+  /** Defaults to true. */
+  mandatory: boolean
+  verify?: VerifySpec
+  /** The condition under which a conditional step applies, as the author wrote it. */
+  when?: string
+}
+
+/**
+ * A contract a person declared (plan F1.7): the `taskmaster:` frontmatter
+ * block, or the same object in an override file (F1.9).
+ */
+export type DeclaredContract = {
+  version: 1
+  /** Defaults to `enforce`: a declared contract is enforced (F1.4). */
+  mode: 'off' | 'advisory' | 'enforce'
+  steps: DeclaredStep[]
+  /** Step ids that need the user's OK first. */
+  confirmBefore: string[]
+  origin?: 'authored' | 'suggested'
+  suggestedBy?: string
+}
+
+/** Why a declared contract wasn't used. */
+export type ContractProblem = { where: 'frontmatter' | 'override'; message: string }
+
+/** Which declared contract a skill has, if any (P1.3), and why any other was set aside. */
+export type DeclaredResolution = {
+  source: 'frontmatter' | 'override' | 'none'
+  contract?: DeclaredContract
+  problems: ContractProblem[]
+}
+
 /** A skill as it loaded (plan F1.1): what `skill.prompt` gave, a content hash, and its loop. */
 export type SkillCapture = {
   skill: string
@@ -95,6 +133,8 @@ export type SkillCapture = {
   via: SkillVia
   /** When it loaded, from `$.clock.now()`. */
   at: number
+  /** Its declared contract, from the frontmatter or an override file (P1.3). */
+  declared: DeclaredResolution
 }
 
 /** A step the deterministic parse found (P1.2). */

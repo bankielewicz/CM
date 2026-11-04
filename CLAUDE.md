@@ -55,8 +55,9 @@ How the bar is enforced:
 - `hooks/selfcheck.ts` is the startup self-check (F14). It keeps one record per Claude Code build in `$.store`, under `self-check/<build>`, listing which of the events in `WATCHED` have fired there, and the settings of the last session to save it. `note()` returns at once. Saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
 - `hooks/skills.ts` captures each skill as it loads and works out its loop (P1.1). `SkillTracker` holds what is open when `skill.prompt` fires: `Skill` calls, a typed command being submitted, and spawned agents that haven't acted. The captures are kept in `$.state` as `taskmaster.skills`.
 - `hooks/parse.ts` is the deterministic parse (P1.2): `parseSkill(text, frontmatter)` returns steps, rules, verify candidates and the frontmatter keys F1.2 names. It's pure and not yet wired; P1.4 uses it.
+- `hooks/contract.ts` is the declared contract (P1.3): `validateDeclared` (strict, all-or-nothing), the frontmatter and override tiers, `resolveDeclared` (frontmatter beats an override) and `pickTier` (principle 1's full order, unwired until P1.4).
 - `types/index.d.ts` holds the mod's own types, and its `$.state` contract.
-- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write, make the version lookup fail, hang or give any answer, make `session.start` itself fail, run a callback inside an event's answer (`during`: the engine expanding a skill mid-call), set what `agent.spawn` answers, and make `$.state` writes fail. A test's `$` has no state noun, so `stateValue(world, 'plugin/key')` reads the mod's latest `$.state` write. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
+- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write, make the version lookup fail, hang or give any answer, make `session.start` itself fail, run a callback inside an event's answer (`during`: the engine expanding a skill mid-call), set what `agent.spawn` answers, make `$.state` writes fail, and serve files to `$.fs.read` (`files`). It records what the mod read (`reads`) and logged (`logs`), and a `$.ui.log` line headed for the transcript counts as shown. A test's `$` has no state noun, so `stateValue(world, 'plugin/key')` reads the mod's latest `$.state` write. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
 
 ## Mod API constraints
 
@@ -72,7 +73,8 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 - Don't make a hook wait on `$.store` or other diagnostics: note the work and return `next(e)`, and save afterwards.
 - A skill's loop comes from what is open when `skill.prompt` fires. `skill.prompt` has no `agentId`, and the order differs by path (plan §9).
 - `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, with a typed command's arguments appended as `"ARGUMENTS: <args>"`, and no YAML block. Parse the body, and hash the body when you need a stable key.
-- The API has no YAML parser. Frontmatter arrives parsed in `e.frontmatter`; anything else in YAML needs a decision (P1.3).
+- The API has no YAML parser. Frontmatter arrives parsed in `e.frontmatter`, and override files are JSON (owner decision, plan F1.9).
+- `$.ui.log` goes to the visible transcript unless given `{ to: 'debug' }`. The mod's own diagnostics always say `debug`.
 - An atom with a `shape` stores `{ shape, value }`. A plain `$.state.get` returns that wrapper, and `read($, atom)` unwraps it.
 
 ## Where the work stands

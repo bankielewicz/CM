@@ -22,6 +22,10 @@ export type World = {
   onWrite: (() => void)[]
   /** The latest value the mod wrote under each `$.state` key, as `plugin/key`. */
   state: Map<string, unknown>
+  /** Every path the mod asked `$.fs.read` for, in order. */
+  reads: string[]
+  /** Every `$.ui.log` line, with where it was sent. */
+  logs: { text: string; to: string }[]
 }
 
 export type EngineOptions = {
@@ -59,6 +63,8 @@ export type EngineOptions = {
   spawnAgentIds?: (string | null)[]
   /** Every `$.state` write fails. */
   failStateWrites?: boolean
+  /** Files `$.fs.read` can read, by absolute path. Any other read fails, as a missing file does. */
+  files?: Record<string, string>
 }
 
 // Nothing sits beneath the plugin in a test: these hooks stand for the
@@ -80,6 +86,8 @@ export function engine(on: On, options: EngineOptions = {}): World {
     release: () => release(),
     onWrite: [],
     state: new Map(),
+    reads: [],
+    logs: [],
   }
   const reach = (event: WatchedEvent): void => {
     world.reached.push(event)
@@ -121,6 +129,20 @@ export function engine(on: On, options: EngineOptions = {}): World {
   on('ui.status', (_, e) => {
     world.shown.push(`status: ${String(e.text)}`)
     return { value: undefined }
+  })
+  on('ui.log', (_, e) => {
+    const to = e.to ?? 'transcript'
+    world.logs.push({ text: e.text, to })
+    // A line in the transcript is something the person sees.
+    if (to !== 'debug') world.shown.push(`log: ${e.text}`)
+    return { value: undefined }
+  })
+  on('session.root', () => ({ value: '/repo' }))
+  on('fs.read', (_, e) => {
+    world.reads.push(e.path)
+    const text = options.files?.[e.path]
+    if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
+    return { value: text }
   })
   on('ui.toast', () => {
     world.shown.push('toast')

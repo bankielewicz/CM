@@ -119,7 +119,15 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
   ```
 - **F1.8 Per-skill user override (for third-party skills):** the first time a skill runs, the Pane shows the extracted contract. `/taskmaster contract edit <skill>` lets the user fix it and saves it to `$.store`. That contract is then `enforce` for that skill version.
 
-- **F1.9 Override storage:** `.taskmaster/overrides/<skill>.yaml` in the project, committed with the checkpoints so the team shares it, mirrored in `$.store`. F16 is the guided way to create one.
+- **F1.9 Override storage:** `.taskmaster/overrides/<skill>.json` in the project (under `overrideDir`), committed with the checkpoints so the team shares it, mirrored in `$.store`. F16 is the guided way to create one.
+  - **JSON, not YAML** (owner decision, 2026-11-04). The mod API has no YAML parser, and a mod has no npm packages. Frontmatter is YAML, but it arrives already parsed.
+  - **The file holds the `taskmaster:` block itself**, not `{ "taskmaster": … }`, with the same keys and checks. For example:
+    ```json
+    { "mode": "enforce",
+      "steps": [ { "id": "tests", "title": "Run the test suite", "verify": { "bash": "npm test" } } ],
+      "confirm_before": [] }
+    ```
+  - **The file is named after the skill as `skill.prompt` names it,** with anything but letters, digits, `.`, `-` and `_` changed to `_`. A plugin's skill arrives plugin-qualified, so `acme:notes` reads `acme_notes.json`; a hand-made `notes.json` won't match it.
 
 ### F2. Ledger: the mod's own record (source of truth)
 - **F2.1** For each `tool.call` on any loop: `agentId`, tool, a trimmed input digest, `isError`, a sequence number, files touched, and the Bash command line.
@@ -399,7 +407,7 @@ A user asks Claude to read a skill and recommend Taskmaster frontmatter for it. 
   - **repo facts for verify specs:** the test, lint, and build commands found in `package.json` scripts, `Makefile`, `pyproject.toml`, `Cargo.toml`, and so on.
 - **`taskmaster_frontmatter_validate { target, yaml }`** runs the deterministic lint (F16.7) and returns errors and warnings. A recommendation must pass it before it's shown.
 - **`taskmaster_frontmatter_apply { suggestion_id, targets[], mode }`** records the decision.
-  - `mode: override`: the mod writes `.taskmaster/overrides/<skill>.yaml` itself.
+  - `mode: override`: the mod writes `.taskmaster/overrides/<skill>.json` itself (F1.9's format and name).
   - `mode: file`: it returns the exact edit for Claude to make with the normal `Edit` tool. **The mod doesn't write skill files itself**, so the user's usual permission prompt and diff view apply.
 
 **F16.4 Workflow**
@@ -543,7 +551,7 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 - **Learned in P1.2.**
   - `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, with no YAML block. A typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. Checked live: the capture's hash matched that form, and `/notes some words here` showed the block.
   - So a hash of the whole text changes with the skill's folder and with every argument. Contract caches and resume checks key on the body alone.
-  - The mod API has no YAML parser; only frontmatter arrives parsed. Override files (F1.9) need a format decision.
+  - The mod API has no YAML parser; only frontmatter arrives parsed. So override files (F1.9) are JSON (owner decision, 2026-11-04).
 - **Learned in P1.1** (seen live on 2.1.317, with probe mods reading the events and the mod's `$.state`):
   - A **typed `/name`** expands inside `prompt.submit`'s `next(e)`, before the main `turn.start`, and `prompt.submit` carries `command: { name, args }`.
   - A **`Skill` tool call** expands while the call is open.

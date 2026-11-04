@@ -10,10 +10,12 @@ import type { Register } from 'claude-code'
 import type { Io, SkillCapture, WatchedEvent } from '../types'
 import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
+import { fromFrontmatter, fromOverride, overrideFile, resolveDeclared } from './contract'
+import type { Tier } from './contract'
 import { contentHash, keepLatest, SkillTracker } from './skills'
 
 // The skills loaded this session, newest last. In $.state, which a hot reload keeps.
-const skillsAtom = atom({ plugin: 'taskmaster', key: 'skills' } as const, [] as SkillCapture[], { shape: 'skills-1' })
+const skillsAtom = atom({ plugin: 'taskmaster', key: 'skills' } as const, [] as SkillCapture[], { shape: 'skills-2' })
 
 export const register: Register = (on, options) => {
   // Module state starts over on a hot reload. The self-check's record is in
@@ -88,6 +90,24 @@ export const register: Register = (on, options) => {
     // Worked out first: the windows that say who loaded it are open now.
     const { loop, via } = skills.attribute(e.skill)
     try {
+      // P1.3: the declared contract. An override file is read only when the
+      // frontmatter gives none, and a missing file declares nothing.
+      const frontmatter = fromFrontmatter(e.frontmatter, e.frontmatterProblem)
+      let override: Tier | undefined
+      if (!frontmatter.contract) {
+        let file: string | undefined
+        try {
+          const root = (await $.session.root()).replace(/\/+$/, '')
+          file = await $.fs.read(`${root}/${config.overrideDir}/${overrideFile(e.skill)}`)
+        } catch {
+          // No override file.
+        }
+        override = fromOverride(file)
+      }
+      const declared = resolveDeclared(frontmatter, override)
+      for (const problem of declared.problems) {
+        $.ui.log(`taskmaster: ${e.skill}: ${problem.where} contract set aside: ${problem.message}`, { to: 'debug' })
+      }
       const capture: SkillCapture = {
         skill: e.skill,
         text: e.text,
@@ -100,6 +120,7 @@ export const register: Register = (on, options) => {
         loop,
         via,
         at: await $.clock.now(),
+        declared,
       }
       await update($, skillsAtom, list => keepLatest(list, capture))
     } catch {
