@@ -117,7 +117,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
         verify: { bash: "npm test", exit: 0 }   # or { edits: "src/**" } / { tool: "<name>" }
     confirm_before: [deploy]  # steps that need the user's OK first
   ```
-- **F1.8 Per-skill user override (for third-party skills):** the first time a skill runs, the Pane shows the extracted contract. `/taskmaster contract edit <skill>` lets the user fix it and saves it to `$.store`. That contract is then `enforce` for that skill version.
+- **F1.8 Per-skill user override (for third-party skills):** the first time a skill runs, the Pane shows the extracted contract. `/taskmaster contract edit <skill>` lets the user fix it, and saves it to the **personal layer** (F1.9). That contract is then `enforce` for that skill version. Only a person can make a change that loosens it (F17).
 
 - **F1.9 Override storage:** `.taskmaster/overrides/<skill>.json` in the project (under `overrideDir`), committed with the checkpoints so the team shares it, mirrored in `$.store`. F16 is the guided way to create one.
   - **JSON, not YAML** (owner decision, 2026-11-04). The mod API has no YAML parser, and a mod has no npm packages. Frontmatter is YAML, but it arrives already parsed.
@@ -127,6 +127,11 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
       "steps": [ { "id": "tests", "title": "Run the test suite", "verify": { "bash": "npm test" } } ],
       "confirm_before": [] }
     ```
+  - **Two layers** (owner decision, 2026-11-04):
+    - **The project layer** is the file above: shared, committed and reviewed.
+    - **The personal layer** is an entry in `$.store`, keyed by repository and skill: edits you don't want to commit. `$.store` is per user and per machine, and doesn't survive a fresh cloud container.
+    - **Open question for the owner:** which layer wins when both exist, and whether an override may beat a third-party skill's own frontmatter.
+    - Both layers are protected as F17 says.
   - **The file is named after the skill as `skill.prompt` names it,** with anything but letters, digits, `.`, `-` and `_` changed to `_`. A plugin's skill arrives plugin-qualified, so `acme:notes` reads `acme_notes.json`; a hand-made `notes.json` won't match it.
 
 ### F2. Ledger: the mod's own record (source of truth)
@@ -476,6 +481,56 @@ A user asks Claude to read a skill and recommend Taskmaster frontmatter for it. 
   - and, later, how runs perform for each origin.
 - **The user's edits to a suggestion are free, correct labels for the compiler.** They're logged as `extraction` incidents and feed the F15 loop.
 
+### F17. Tamper resistance: Claude can't loosen its own contract
+
+The worry is Claude weakening what it's held to, to "game" the system: editing an override, a skill's `taskmaster:` block or the mod's settings so a step it skipped no longer counts.
+
+**What can't be done.** The mod can't stop Claude, running as the same OS user, from editing these files, and it can't hide them.
+- The personal layer is a plain JSON file, `~/.claude/plugins/store/<plugin>…json` (seen on 2.1.317).
+- The mod's own source and docs can be read too.
+- In a cloud container Claude runs as root, so file permissions don't help either.
+
+So F17 is a guard rail, not a security boundary, in the same way as this repository's own deny rules, and in line with §7: *visible* skipping, not perfect prevention.
+
+**What is promised instead: an edit never loosens enforcement unless a person approves it, and the person always sees it.**
+
+**The levers it covers:**
+- the project override file and the personal layer,
+- a project skill's own `taskmaster:` block,
+- the mod's settings in `settings.json` (`strictness` and the rest),
+- `/taskmaster off` and `waive`.
+
+The mod's own code is covered by visibility only.
+
+**The mechanisms, strongest first:**
+1. **A run keeps the contract it started with**, as F16.6 already says for frontmatter.
+2. **Loosening needs a person.** Loosening means: a lower `mode`, a mandatory step removed or made optional, a `verify` spec removed or changed, or `confirm_before` dropped.
+   - A changed contract that loosens applies only after the person says yes in `$.ui.ask`, the engine's own dialog.
+   - In a `-p` run `$.ui.ask` rejects (no one to ask), so an unapproved loosening never applies there.
+   - A change that only tightens applies at once.
+3. **Only person-driven channels write.**
+   - The personal layer is written only by a typed `/taskmaster` command, followed by `$.ui.ask` for any loosening.
+   - Seen live: the model can't run a plugin's registered command. The `Skill` tool refuses it ("Ask the user to run /gp-hello themselves").
+   - F16's `taskmaster_frontmatter_apply` is a tool the model can call, so it puts the decision to the person itself, through `$.ui.ask`. F16.4's AskUserQuestion step is the model's own, so it doesn't count.
+   - The command's `origin` isn't relied on. It reads `sdk` for a typed command in a `-p` run, and a nested `claude -p` that Claude starts from the shell would read the same. The `$.ui.ask` step is what can't be faked.
+4. **A guard in `tool.check`.** It answers `ask` for:
+   - `Write`, `Edit` and `NotebookEdit` on a protected path,
+   - non-read-only `Bash` whose command names one.
+
+   A plugin's `ask` goes to a person.
+   - Seen live on 2.1.317: in default and accept-edits modes, a `-p` run refused the write, and the file wasn't created.
+   - Bypass mode is untested, because the cloud sandbox won't start one.
+   - The Bash part is best effort: a command can name a path indirectly.
+5. **A session copy of the personal layer in `$.state`.** `$.state` lives in the engine's memory, not on disk. A later read of `$.store` that differs from the mod's own last write is evidence of tampering: the mod ignores it and files an incident.
+6. **Visibility, the backstop for what the guard misses:**
+   - The summary below each answer (F11) names the contract's source whenever it's an override, and flags a contract that is looser than what it replaced.
+   - Any tool call that touches a protected path trips an F15.1 canary, with the RCA category *model gaming*.
+   - Checkpoint commits leave `overrides/` out (F8.1), so the mod's own commit never turns an unapproved edit into history that looks reviewed.
+
+**Future work, for teams that need a real guarantee:** an authority outside the process.
+- Managed settings owned by root, with permission deny rules on the protected paths, and Claude running as a non-root user.
+- Approvals signed with a key only the person holds.
+
 ## 6. Strictness levels
 
 | Level | Footer | Plan Gate | G1/G2 | G3/G4 Stop | Drift | Checkpoints | Audit |
@@ -521,6 +576,7 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 | Comparing frontmatter vs none is confounded | Paired design: the same skills with and without frontmatter; arms assigned per run by hash |
 | Suggested frontmatter over-enforces a skill | Must pass validation (grounding, runnable verify, conditional-language checks); user review required; `advisory` when unsure; performance tracked per origin |
 | Advisor edits a file it shouldn't (another author's or managed) | Target chosen by skill source; installed and managed skills get an override plus an upstream suggestion |
+| Claude edits its own contract, overrides or settings to loosen enforcement | F17: a run keeps its contract; loosening needs the person's yes in `$.ui.ask`; a `tool.check` guard sends writes to protected paths to a person; override sources and loosened contracts are shown; checkpoint commits leave `overrides/` out |
 | Edit damages a skill | Edits go through the normal `Edit` tool with its permission prompt; post-check allows only the `taskmaster:` key to change; never committed automatically |
 
 ## 9. Build order
@@ -548,6 +604,11 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 - **A subagent's answer comes from `turn.complete`, not SubagentStop.** When a spawned agent reports through `SubagentHandback` (auto mode), its SubagentStop has an empty `last_assistant_message`. When it ends with a plain answer (plan and default modes), SubagentStop carries the text. After a block, the agent's next SubagentStop fires before its `turn.complete`, and in both cases `turn.complete` carries the whole report as `answer`, with `agentId`. G4's question detection and any check of a subagent's answer read it there.
 - **Only auto-mode subagents report through `SubagentHandback`, and a SubagentStop block can't hold those** (seen live on 2.1.317). All 5 auto-mode subagents were told to hand back and did. The plan-mode and default-mode ones (1 each) ended with a plain answer. A hand-back delivers the report before SubagentStop fires, and the engine ends the agent whatever the hook answers. There's no second stop, and `turn.complete` follows (0 of 2 held). A plain-answer subagent is held by the block (1 of 1). A `tool.call` deny on `SubagentHandback` holds a hand-back subagent (2 of 2), but the subagent acted on the deny's text only once. The other time, it retried with the same report. So G4 uses both hooks, with a cap (§10.1).
 - **Classic hook payloads carry `permission_mode`** (UserPromptSubmit, Stop, SessionStart, SubagentStop). The mod reads the mode a turn's calls run in from UserPromptSubmit. The cloud session's Accept edits mode arrives as `default`.
+- **Learned planning F17** (checked live on 2.1.317, with a probe mod):
+  - `$.store` is a plain JSON file, `~/.claude/plugins/store/<plugin>_<source>-<hash>.json`, which the same OS user can edit.
+  - A plugin's `tool.check` `ask` goes to a person. A `-p` run, with no person, refused the write in default and accept-edits modes, and the file wasn't created. Bypass mode is untested.
+  - The model can't run a plugin's registered command: the `Skill` tool refuses it.
+  - A typed command in a `-p` run carries `origin: { kind: 'sdk' }`, not `composer`.
 - **Learned in P1.2.**
   - `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, with no YAML block. A typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. Checked live: the capture's hash matched that form, and `/notes some words here` showed the block.
   - So a hash of the whole text changes with the skill's folder and with every argument. Contract caches and resume checks key on the body alone.

@@ -26,6 +26,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
 3. **The spike (P1.0b).** Delete it, in the two PRs and the order P1.0b gives.
 4. **`sentimentClassifier` waits** (PR #6 review). It's F13.3's optional label of your next prompt after a block. No Phase 1 task builds it, and a privacy setting that does nothing would mislead, so it isn't a setting yet. It comes back with the task that builds it.
 5. **Override files are JSON** (2026-11-04, for P1.3). The mod API has no YAML parser, so `.taskmaster/overrides/<skill>.json` holds the `taskmaster:` block's object (plan F1.9).
+6. **A personal layer beside the project file, protected against Claude** (2026-11-04). Personal overrides go in `$.store`, keyed by repository and skill. No change made by Claude loosens a contract without the person's yes. **Still open:** which layer wins when both exist, and whether an override may beat a third-party skill's own frontmatter (P1.7b).
 
 ## M0. Scaffold
 - [x] P1.0 **Scaffold the mod** (F12, F14). **Done: merged in PR #6.** Create `taskmaster/.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`, `types/` and `tests/`, with a test `engine()` helper like the spike's. Add the Phase 1 keys of `userConfig` (F12). At `session.start`, build the `Io` table and flush buffered early events. A startup self-check logs which events fired on this build (F14).
@@ -132,14 +133,37 @@ Report the commands with their output. `main` is protected, so each task (or a s
 - [ ] P1.7 **The three tools** (F3). `taskmaster_waive`, `taskmaster_await_user` and `taskmaster_checkpoint`, each registered with `isDeferred: false`. At `strict`, a waiver needs the user's yes through `$.ui.ask`. **Red:** each tool updates the run state, and a strict-mode waiver without a yes is refused. *Depends on P1.6.*
 
 ## M3. Gates (F4 G1–G3, F5, §6)
+- [ ] P1.7b **Guard the contract's levers, and add the personal layer** (F17, F1.8, F1.9; owner decision 6). This must land before the gates enforce anything, and P1.8–P1.10 depend on it.
+  - **Protected paths:**
+    - `<root>/<overrideDir>/**`,
+    - the mod's `$.store` file (`~/.claude/plugins/store/taskmaster*`),
+    - a project skill's `taskmaster:` key,
+    - settings files where a write touches the mod's `pluginConfigs`.
+  - **The guard:** `tool.check` answers `ask` for `Write`, `Edit` and `NotebookEdit` on a protected path, and for non-read-only `Bash` that names one (best effort).
+  - **Freeze and approval:** a run keeps the contract it started with. A change that loosens a contract (as F17 defines it) applies only after the person's yes in `$.ui.ask`, and never in a `-p` run. A change that only tightens applies at once.
+  - **The personal layer:** read from and written to `$.store`, keyed by repository and skill. It's written only by a typed `/taskmaster` command or after `$.ui.ask`. Its session copy lives in `$.state`, so a store that differs from the mod's last write is ignored and files an incident.
+  - **Visibility:** the source of each override is recorded for P1.17's summary, and a loosened contract is flagged. A tool call that touches a protected path is recorded for P1.21's *model gaming* tripwire.
+  - **Claude-facing text** never mentions overrides or the personal layer. A refused write says to ask the person, or to use `taskmaster_waive`.
+  - **Open questions for the owner, before this task starts:**
+    1. Which layer wins when both exist?
+    2. May an override beat a third-party skill's own frontmatter?
+  - **Still to check live:** the `origin` of a command typed in the Claude app (try the `/tm-origin` probe in this session), and a plugin's `ask` in bypass mode.
+
+  **Red:**
+  - each guarded write gets `ask`, and an unguarded one doesn't,
+  - a loosening override is ignored without a yes, and a tightening one applies,
+  - a store edited behind the mod's back is ignored and recorded,
+  - the frozen contract survives a mid-run override edit.
+
+  *Depends on P1.6 and P1.3.*
 - [ ] P1.8 **G1: completion gate** (F4, F8.4). Deny `TaskUpdate status=completed` when:
   - no work was recorded between `in_progress` and `completed`,
   - a verify spec isn't met after the last edit (matched on both the command and the error flag, so `echo PASS` doesn't count),
   - completions arrive in a burst with no work between them,
   - `metadata.handoff` is missing.
 
-  Every deny ends with the waive instruction. This is the only gate with a `.catch`, because it may fail closed. A `classic.TaskCompleted` block is the backstop (spike: `deny-complete`, `taskcompleted-block`). **Red:** one test per deny reason, plus `echo PASS`, plus a completion that passes. *Depends on P1.7. With P1.9, covers DoD 2.*
-- [ ] P1.9 **G2: delete gate** (F4). `TaskUpdate status=deleted` on a step's task is denied and redirected to `taskmaster_waive`. **Red:** deleting a task that isn't a step's is allowed. *Depends on P1.6.*
+  Every deny ends with the waive instruction. This is the only gate with a `.catch`, because it may fail closed. A `classic.TaskCompleted` block is the backstop (spike: `deny-complete`, `taskcompleted-block`). **Red:** one test per deny reason, plus `echo PASS`, plus a completion that passes. *Depends on P1.7 and P1.7b. With P1.9, covers DoD 2.*
+- [ ] P1.9 **G2: delete gate** (F4). `TaskUpdate status=deleted` on a step's task is denied and redirected to `taskmaster_waive`. **Red:** deleting a task that isn't a step's is allowed. *Depends on P1.6 and P1.7b.*
 - [ ] P1.10 **G3: Stop gate, with F5 safety and the freshness gate** (F4, F5, F8.4). Block the stop while this loop's steps are uncovered, pending or in progress. The reason lists the step ids and the three ways out: do the step, waive it, or call `await_user`.
   - **Limits:** at most `maxStopBlocks` blocks per contract per user turn, and a new block only after the ledger has moved. After that, release the stop with `released: S3, S5 unverified` below the answer.
   - **Never block** with background tasks or crons running, on a `stop_hook_active` re-entry, or after `isAborted`.
@@ -147,7 +171,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - **Fails open** (spike: `stop-block`).
   - **Freshness gate:** under the same cap, also block when there has been no checkpoint call since the last write call.
 
-  **Red:** a test per rule, including "no trapped session: the stop after the cap always passes" (Gate B safety: 0 trapped sessions), and one that a trailing "?" lets the stop through and records it. *Depends on P1.7. DoD 3.*
+  **Red:** a test per rule, including "no trapped session: the stop after the cap always passes" (Gate B safety: 0 trapped sessions), and one that a trailing "?" lets the stop through and records it. *Depends on P1.7 and P1.7b. DoD 3.*
 - [ ] P1.11 **Strictness and the off switches** (§6, F9). `observe`, `advisory`, `enforce` and `strict` change what G1–G3 do: log, warn, deny/block, or strict mode's extras (a waiver needs the user's yes; the cap is 3 blocks). Esc (`isAborted`) freezes every gate for that turn, `/taskmaster off` always wins, and reference skills cause no blocks. **Red:** a table-driven test over §6's rows for G1–G3. *Depends on P1.8–P1.10. DoD 4.*
 
 ## M4. Checkpoints and resume (F8.1–F8.6)
@@ -160,7 +184,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   **Red:** a checkpoint round-trips, a planted secret never reaches disk, and a shell `cd` doesn't move the writes. *Depends on P1.6.*
 - [ ] P1.13 **When to write, and git** (F8.3, F8.1).
   - **When to write:** after every task transition, every `checkpointEveryWrites` write calls, at PreCompact, at every Stop, at `session.end` (the run is marked `paused` unless it's done), and at `contextCheckpointPercent`.
-  - **Milestone commits:** `git add -- .taskmaster/`, then `git commit --only -- .taskmaster/` (spike: `git-commit-only`), at most one commit per milestone. `checkpointPush: milestone` pushes them.
+  - **Milestone commits:** `git add -- .taskmaster/`, then `git commit --only -- .taskmaster/` (spike: `git-commit-only`), at most one commit per milestone. **Leave `overrides/` out of both** (F17), so the mod's own checkpoint never commits an unapproved override edit. `checkpointPush: milestone` pushes them.
   - **First-commit notice:** shown for a public or unknown remote, using `gh repo view` to find out which. The answer is stored per repository, and a headless run logs that the notice wasn't shown.
 
   **Red:**
