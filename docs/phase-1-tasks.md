@@ -87,6 +87,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
 - [ ] P1.2 **Deterministic parse** (F1.2). Name, description, and the `allowed-tools`, `context: fork` and `disable-model-invocation` frontmatter keys. Numbered or ordered lists, "Step N" headings, `- [ ]` checklists, MUST/NEVER/ALWAYS lines, and test, lint or build commands in code fences (candidate verify commands). **Red:** fixtures for a numbered workflow, a checklist skill, and a reference skill that yields no steps. *Depends on P1.1.*
 - [ ] P1.3 **Frontmatter and overrides** (F1.7, F1.9). Parse and schema-validate the `taskmaster:` block, and read `.taskmaster/overrides/<skill>.yaml`. Precedence is frontmatter, then override, then LLM, then heuristics (principle 1). **Red:** invalid frontmatter falls back with a logged reason, and an override beats extraction. *Depends on P1.2.*
 - [ ] P1.4 **Cached extraction and enforcement level** (F1.3, F1.4). One Haiku call returns JSON that is validated against a schema and cached in `$.store` by path + hash. If the call fails, the F1.2 result is used. The level is `enforce`, `advisory` or `none`: `none` for reference and persona skills and for `exemptSkills`. **Red:**
+  - **The cache key** (found in P1.1, checked live on 2.1.317). `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, and a typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. So P1.1's capture `hash` changes with the skill's folder and with every argument. Key the cache on a hash of the body alone (header and `ARGUMENTS` block removed), with the path, or on the file's own content.
   - a second load of the same hash makes no model call,
   - a failed call yields the F1.2 result as `advisory`,
   - high confidence that disagrees with the parse stays `advisory`.
@@ -150,6 +151,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
 
   **Red:** a test driven by the spike's observed event order (`session.compact` → PreCompact → SessionStart(compact) → PostCompact). *Depends on P1.13. DoD 5.*
 - [ ] P1.15 **Cold-start resume** (F8.6, with §9's restart finding).
+  - **Compare body hashes.** A resume in another checkout (a cloud container, a laptop) has a different skill folder, so P1.1's capture hash differs even when the skill hasn't changed. Compare a hash of the body without the header and `ARGUMENTS` block (P1.4's key), or every cross-machine resume asks about a changed skill.
   - **When to check:** at `SessionStart(startup|clear)` *and* at `session.start`, without offering the same run twice.
   - **How it's offered:** a briefing as `additionalContext`, plus a band entry; `resumePolicy` applies.
   - **`/taskmaster resume`:**
