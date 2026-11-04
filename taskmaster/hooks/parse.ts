@@ -33,6 +33,13 @@ const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/
 /** A marker at any depth and the spaces after it. `LIST_ITEM` stops at 3, and an item nested deeper has content of its own. */
 const ANY_ITEM = /^(\s*(?:[-*+]|\d+[.)]))(\s+)/
 
+/** The column a line's text reaches, with each tab moving on to the next multiple of four, as CommonMark counts. */
+function columns(text: string): number {
+  let column = 0
+  for (const char of text) column = char === '\t' ? column + 4 - (column % 4) : column + 1
+  return column
+}
+
 /**
  * `fence`: the line is a code fence itself. `indent`: the fence's, on the lines
  * inside it. `inList`: a list was open when this line began. `afterText`: the line
@@ -98,7 +105,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
         return { ...line, code: { lang: '', fence: true } }
       }
       const blank = line.text.trim() === ''
-      if (!blank && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : line.text.search(/\S/) >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
+      if (!blank && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : columns(/^\s*/.exec(line.text)?.[0] ?? '') >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
       codeMayStart = blank
       const inHtml = htmlCloser !== undefined
       // A blank line ends any of them. CommonMark lets a comment run on past one, and reading on from there is what `main` did.
@@ -107,7 +114,11 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       afterText = !blank
       // `* * *` and `- - -` have a list marker's shape, and are thematic breaks.
       const item = THEMATIC_BREAK.test(line.text) ? null : ANY_ITEM.exec(line.text)
-      if (item) contentIndent = (item[1] as string).length + ((item[2] as string).length > 4 ? 1 : (item[2] as string).length)
+      if (item) {
+        const marker = columns(item[1] as string)
+        const spaces = columns(`${item[1]}${item[2]}`) - marker
+        contentIndent = marker + (spaces > 4 ? 1 : spaces)
+      }
       if (item && !inHtml && LIST_ITEM.test(line.text)) listIndent = Math.min(listIndent ?? Number.POSITIVE_INFINITY, line.text.search(/\S/))
       else if (listIndent !== undefined && endsList(marked, listIndent)) listIndent = undefined
       if (!inHtml && listIndent === undefined) htmlCloser = opensHtml(line.text)

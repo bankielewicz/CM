@@ -848,3 +848,15 @@ test('a rule inside an HTML block still counts', () => {
 test('a block tag deeper than an open list stays in the list', () => {
   expect(titles('1. a\n   <div>\n2. b\n')).toEqual(['a', 'b'])
 })
+
+test("tabs count to the next multiple of four, in an item's content and in the lines under it", () => {
+  expect(rulesIn('-\tWork\n\n      You MUST add tests.\n')).toEqual(['MUST'])
+  expect(rulesIn('  -\tWork\n\n      You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('1.\tWork\n\n       You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('- Work\n\n  \tYou MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('-\tWork\n\n        You MUST x\n')).toEqual([])
+  expect(rulesIn('  -\tWork\n\n        You MUST x\n')).toEqual([])
+  expect(rulesIn('1.\tWork\n\n        You MUST x\n')).toEqual([])
+  expect(rulesIn('- Work\n\n\t\tYou MUST x\n')).toEqual([])
+  expect(rulesIn('-\t\tWork\n\n      You MUST x\n')).toEqual([])
+})
