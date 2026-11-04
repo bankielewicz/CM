@@ -860,3 +860,20 @@ test("tabs count to the next multiple of four, in an item's content and in the l
   expect(rulesIn('- Work\n\n\t\tYou MUST x\n')).toEqual([])
   expect(rulesIn('-\t\tWork\n\n      You MUST x\n')).toEqual([])
 })
+
+test('a heredoc delimiter keeps a substitution whole, as bash reads it literally', () => {
+  expect(commandsIn(shell('cat <<$(echo EOF)', 'npm test', '$(echo EOF)', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$(x)y', 'npm test', '$(x)y', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<`echo E`', 'npm test', '`echo E`', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$(a (b) c)', 'npm test', '$(a (b) c)', 'make lint'))).toEqual(['make lint'])
+})
+
+test('a substitution left unclosed in a delimiter opens no heredoc', () => {
+  expect(commandsIn(shell('cat <<$(echo', 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('cat <<`echo', 'npm test'))).toEqual(['npm test'])
+})
+
+test('a parenthesis that is not a substitution still ends the delimiter', () => {
+  expect(commandsIn(shell('x=$(cat <<EOF)', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$X)', 'npm test', '$X', 'make lint'))).toEqual(['make lint'])
+})

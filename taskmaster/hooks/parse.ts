@@ -295,6 +295,14 @@ function readHeredoc(text: string, at: number): Heredoc | undefined {
   let word = ''
   for (; cursor < text.length; cursor += 1) {
     const char = text[cursor] as string
+    // Bash takes `$(…)`, `${…}` and `` `…` `` in a delimiter literally, with whatever they hold.
+    const close = char === '`' ? text.indexOf('`', cursor + 1) : char === '$' ? closing(text, cursor + 1) : cursor
+    if (close === -1) return undefined
+    if (close !== cursor) {
+      word += text.slice(cursor, close + 1)
+      cursor = close
+      continue
+    }
     if (/[\s;&|<>()]/.test(char)) break
     if (char === '\\') {
       cursor += 1
@@ -307,6 +315,21 @@ function readHeredoc(text: string, at: number): Heredoc | undefined {
     } else word += char
   }
   return word ? { word, stripTabs } : undefined
+}
+
+/**
+ * Where the bracket opening at `open` closes, counting nested ones: -1 if it never
+ * does, and `open - 1` when no `(` or `{` is there, so the `$` is an ordinary character.
+ */
+function closing(text: string, open: number): number {
+  const pair = text[open] === '(' ? '()' : text[open] === '{' ? '{}' : ''
+  if (!pair) return open - 1
+  let depth = 0
+  for (let at = open; at < text.length; at += 1) {
+    if (text[at] === pair[0]) depth += 1
+    else if (text[at] === pair[1] && (depth -= 1) === 0) return at
+  }
+  return -1
 }
 
 /** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
