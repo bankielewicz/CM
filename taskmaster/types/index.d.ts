@@ -70,3 +70,38 @@ export type Io = {
   storeGet: (key: string) => Promise<unknown>
   storeSet: (key: string, value: unknown) => Promise<void>
 }
+
+/** Which loop a skill belongs to: the main loop, a subagent, or one the mod couldn't tell (P1.1). */
+export type SkillLoop = { kind: 'main' } | { kind: 'agent'; agentId: string } | { kind: 'unknown' }
+
+/**
+ * How the loop was worked out: an open Skill tool call, a typed `/name` being
+ * submitted, a subagent just spawned with the skill preloaded, or none of them.
+ */
+export type SkillVia = 'skill-tool' | 'typed' | 'agent-preload' | 'unattributed'
+
+/** A skill as it loaded (plan F1.1): what `skill.prompt` gave, a content hash, and its loop. */
+export type SkillCapture = {
+  skill: string
+  text: string
+  frontmatter: Readonly<Record<string, unknown>>
+  frontmatterProblem?: string
+  source: string
+  pluginName?: string
+  path?: string
+  /** SHA-256 of `text`, as hex. With `path`, the key P1.4 caches an extraction under. */
+  hash: string
+  loop: SkillLoop
+  via: SkillVia
+  /** When it loaded, from `$.clock.now()`. */
+  at: number
+}
+
+declare module 'claude-code' {
+  interface PluginState {
+    taskmaster: {
+      /** The skills loaded this session, newest last, at most 20. */
+      skills: Shaped<SkillCapture[]>
+    }
+  }
+}

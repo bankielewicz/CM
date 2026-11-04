@@ -1,19 +1,26 @@
 // Taskmaster: holds Claude to the workflow of the skill it loads (see
-// docs/taskmaster-plan.md). This is the P1.0 scaffold: it reads its settings,
-// builds the engine table at session.start, and runs the startup self-check.
-// Every hook passes its event on unchanged, and nothing is shown.
+// docs/taskmaster-plan.md). So far: it reads its settings, builds the engine
+// table at session.start, runs the startup self-check (P1.0), and records each
+// skill as it loads with the loop it belongs to (P1.1). Every hook passes its
+// event on unchanged, and nothing is shown.
 
+import { atom, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { Io, WatchedEvent } from '../types'
+import type { Io, SkillCapture, WatchedEvent } from '../types'
 import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
+import { contentHash, keepLatest, SkillTracker } from './skills'
+
+// The skills loaded this session, newest last. In $.state, which a hot reload keeps.
+const skillsAtom = atom({ plugin: 'taskmaster', key: 'skills' } as const, [] as SkillCapture[], { shape: 'skills-1' })
 
 export const register: Register = (on, options) => {
   // Module state starts over on a hot reload. The self-check's record is in
   // $.store, which a reload keeps, and each save merges with it.
   const config = parseConfig(options)
   const selfCheck = new SelfCheck()
+  const skills = new SkillTracker()
 
   // Notes an event for the self-check. It never waits on the store.
   const seen = (event: WatchedEvent): void => selfCheck.note(event)
@@ -39,16 +46,65 @@ export const register: Register = (on, options) => {
   // takes only a function literal as a hook, so each is written out here.
   on('session.end', (_, e, next) => { seen('session.end'); return next(e) })
   on('session.compact', (_, e, next) => { seen('session.compact'); return next(e) })
-  on('prompt.submit', (_, e, next) => { seen('prompt.submit'); return next(e) })
   on('turn.start', (_, e, next) => { seen('turn.start'); return next(e) })
-  on('turn.complete', (_, e, next) => { seen('turn.complete'); return next(e) })
-  on('tool.call', (_, e, next) => { seen('tool.call'); return next(e) })
+  on('turn.complete', (_, e, next) => { seen('turn.complete'); skills.acted(e.agentId); return next(e) })
+  on('tool.call', (_, e, next) => { seen('tool.call'); skills.acted(e.agentId); return next(e) })
   on('tool.check', (_, e, next) => { seen('tool.check'); return next(e) })
-  on('skill.prompt', (_, e, next) => { seen('skill.prompt'); return next(e) })
-  on('agent.spawn', (_, e, next) => { seen('agent.spawn'); return next(e) })
   on('classic.SessionStart', (_, e, next) => { seen('classic.SessionStart'); return next(e) })
   on('classic.PreCompact', (_, e, next) => { seen('classic.PreCompact'); return next(e) })
   on('classic.PostCompact', (_, e, next) => { seen('classic.PostCompact'); return next(e) })
   on('classic.Stop', (_, e, next) => { seen('classic.Stop'); return next(e) })
   on('classic.TaskCompleted', (_, e, next) => { seen('classic.TaskCompleted'); return next(e) })
+
+  // P1.1: what is open when a skill loads says which loop it belongs to.
+  on('tool.call', { tool: 'Skill' }, async (_, e, next) => {
+    skills.skillCallOpened(e.tool_use_id, e.skill, e.agentId)
+    try {
+      return await next(e)
+    } finally {
+      skills.skillCallClosed(e.tool_use_id)
+    }
+  })
+
+  on('prompt.submit', async (_, e, next) => {
+    seen('prompt.submit')
+    const typed = e.command ? skills.typedOpened(e.command.name) : undefined
+    try {
+      return await next(e)
+    } finally {
+      if (typed !== undefined) skills.typedClosed(typed)
+    }
+  })
+
+  on('agent.spawn', async (_, e, next) => {
+    seen('agent.spawn')
+    const spawned = await next(e)
+    if (typeof spawned.agentId === 'string') skills.spawned(spawned.agentId)
+    return spawned
+  })
+
+  on('skill.prompt', async ($, e, next) => {
+    seen('skill.prompt')
+    // Worked out first: the windows that say who loaded it are open now.
+    const { loop, via } = skills.attribute(e.skill)
+    try {
+      const capture: SkillCapture = {
+        skill: e.skill,
+        text: e.text,
+        frontmatter: e.frontmatter,
+        ...(e.frontmatterProblem === undefined ? {} : { frontmatterProblem: e.frontmatterProblem }),
+        source: e.source,
+        ...(e.pluginName === undefined ? {} : { pluginName: e.pluginName }),
+        ...(e.path === undefined ? {} : { path: e.path }),
+        hash: await contentHash(e.text),
+        loop,
+        via,
+        at: await $.clock.now(),
+      }
+      await update($, skillsAtom, list => keepLatest(list, capture))
+    } catch {
+      // A skill that can't be recorded still loads. Later tasks treat it as unknown.
+    }
+    return next(e)
+  })
 }

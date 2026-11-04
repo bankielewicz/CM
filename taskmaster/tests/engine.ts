@@ -20,6 +20,8 @@ export type World = {
   release: () => void
   /** Called after each completed `$.store.set`. */
   onWrite: (() => void)[]
+  /** The latest value the mod wrote under each `$.state` key, as `plugin/key`. */
+  state: Map<string, unknown>
 }
 
 export type EngineOptions = {
@@ -43,6 +45,20 @@ export type EngineOptions = {
   versionAnswer?: unknown
   /** The engine's own `session.start` throws, after noting it was reached. */
   failStart?: boolean
+  /**
+   * Runs inside the engine's answer to these events, before it answers: the
+   * engine expanding a skill while a Skill call, a typed command or a spawn is
+   * still open. Each gets the event's input.
+   */
+  during?: {
+    toolCall?: (e: { tool: string; agentId?: string }) => Promise<unknown>
+    promptSubmit?: (e: { text: string }) => Promise<unknown>
+    agentSpawn?: () => Promise<unknown>
+  }
+  /** The agent id each `agent.spawn` answers with, in turn; `null` denies that spawn. */
+  spawnAgentIds?: (string | null)[]
+  /** Every `$.state` write fails. */
+  failStateWrites?: boolean
 }
 
 // Nothing sits beneath the plugin in a test: these hooks stand for the
@@ -63,6 +79,7 @@ export function engine(on: On, options: EngineOptions = {}): World {
     reached: [],
     release: () => release(),
     onWrite: [],
+    state: new Map(),
   }
   const reach = (event: WatchedEvent): void => {
     world.reached.push(event)
@@ -124,8 +141,9 @@ export function engine(on: On, options: EngineOptions = {}): World {
     reach('session.compact')
     return { skip: 'engine skip' }
   })
-  on('prompt.submit', (_, e) => {
+  on('prompt.submit', async (_, e) => {
     reach('prompt.submit')
+    await options.during?.promptSubmit?.(e)
     return { text: `engine: ${e.text}` }
   })
   on('turn.start', () => {
@@ -136,8 +154,9 @@ export function engine(on: On, options: EngineOptions = {}): World {
     reach('turn.complete')
     return { text: 'engine summary' }
   })
-  on('tool.call', () => {
+  on('tool.call', async (_, e) => {
     reach('tool.call')
+    await options.during?.toolCall?.(e)
     return { result: { text: 'engine result' } }
   })
   on('tool.check', () => {
@@ -148,9 +167,19 @@ export function engine(on: On, options: EngineOptions = {}): World {
     reach('skill.prompt')
     return { text: 'engine skill text' }
   })
-  on('agent.spawn', () => {
+  const spawnIds = [...(options.spawnAgentIds ?? [])]
+  on('agent.spawn', async () => {
     reach('agent.spawn')
-    return { model: 'haiku', agentId: 'engine-agent' }
+    await options.during?.agentSpawn?.()
+    const agentId = spawnIds.length > 0 ? spawnIds.shift() : 'engine-agent'
+    if (agentId === null) return { deny: 'engine refused the spawn' }
+    return { model: 'haiku', agentId }
+  })
+  // A test's `$` has no state noun, so the mod's state is read from its writes.
+  on('state.set', (_, e, next) => {
+    if (options.failStateWrites) throw new Error('state unavailable')
+    world.state.set(`${e.plugin}/${e.key}`, e.value)
+    return next(e)
   })
   on('classic.SessionStart', () => {
     reach('classic.SessionStart')
@@ -206,4 +235,17 @@ export function untilSaved(
 /** Waits until the saved record lists every one of `events`. */
 export function untilSeen(world: World, ...events: WatchedEvent[]): Promise<SelfCheckRecord> {
   return untilSaved(world, record => events.every(event => record.seen.includes(event)))
+}
+
+/**
+ * The latest value the mod wrote under a `$.state` key (`plugin/key`). A
+ * value written through an atom with a `shape` is stored as `{ shape, value }`,
+ * so it is unwrapped here.
+ */
+export function stateValue(world: World, key: string): unknown {
+  const written = world.state.get(key)
+  if (typeof written === 'object' && written !== null && 'shape' in written && 'value' in written) {
+    return (written as { value: unknown }).value
+  }
+  return written
 }

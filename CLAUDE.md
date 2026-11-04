@@ -53,8 +53,9 @@ How the bar is enforced:
 - `hooks/register.tsx` registers every hook. At `session.start` it builds the `Io` table (`types/index.d.ts`), the engine calls helpers get in place of `$`.
 - `hooks/config.ts` holds `DEFAULTS` (plan F12's Phase 1 keys) and `parseConfig`. That function holds what `register(on, options)` receives to each key's choices and range. `plugin.json`'s `userConfig` declares the same defaults, and a test checks both against F12, reading `plugin.json`'s through the options the kit fills in. A key retyped there fails the test that sets every key, because the kit refuses an option that doesn't fit its declared type. A key removed or added there isn't caught, because `parseConfig` falls back to `DEFAULTS` and undeclared options still arrive.
 - `hooks/selfcheck.ts` is the startup self-check (F14). It keeps one record per Claude Code build in `$.store`, under `self-check/<build>`, listing which of the events in `WATCHED` have fired there, and the settings of the last session to save it. `note()` returns at once. Saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
-- `types/index.d.ts` holds the mod's own types.
-- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write, make the version lookup fail, hang or give any answer, and make `session.start` itself fail. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
+- `hooks/skills.ts` captures each skill as it loads and works out its loop (P1.1). `SkillTracker` holds what is open when `skill.prompt` fires: `Skill` calls, a typed command being submitted, and spawned agents that haven't acted. The captures are kept in `$.state` as `taskmaster.skills`.
+- `types/index.d.ts` holds the mod's own types, and its `$.state` contract.
+- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write, make the version lookup fail, hang or give any answer, make `session.start` itself fail, run a callback inside an event's answer (`during`: the engine expanding a skill mid-call), set what `agent.spawn` answers, and make `$.state` writes fail. A test's `$` has no state noun, so `stateValue(world, 'plugin/key')` reads the mod's latest `$.state` write. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
 
 ## Mod API constraints
 
@@ -68,10 +69,12 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 - A hook passed to `on` must be a function literal, or the name of one. A call that returns a hook, such as `on('x', observe('x'))`, stops the module loading.
 - Declare no `min` or `max` on a `userConfig` number. The engine refuses to load the module when a stored value is outside them, which switches the whole mod off. Clamp in `parseConfig` instead. A string outside its `options` arrives as unset, so `options` are safe to keep for the `/config` picker.
 - Don't make a hook wait on `$.store` or other diagnostics: note the work and return `next(e)`, and save afterwards.
+- A skill's loop comes from what is open when `skill.prompt` fires. `skill.prompt` has no `agentId`, and the order differs by path (plan §9).
+- An atom with a `shape` stores `{ shape, value }`. A plain `$.state.get` returns that wrapper, and `read($, atom)` unwraps it.
 
 ## Where the work stands
 
-`docs/phase-1-tasks.md` is the durable checklist for the Phase 1 MVP, and the first open item is the next step. Skip an item marked **Waiting on the owner**, such as P1.0b: its remaining step is the owner's. So the next step for Claude is P1.1. Built-in tasks don't survive `/clear` or a new session, so re-create them from that file. Gate A is recorded in plan §10.1 (GO, 2026-11-03).
+`docs/phase-1-tasks.md` is the durable checklist for the Phase 1 MVP, and the first open item is the next step. Skip an item marked **Waiting on the owner**, such as P1.0b: its remaining step is the owner's. Built-in tasks don't survive `/clear` or a new session, so re-create them from that file. Gate A is recorded in plan §10.1 (GO, 2026-11-03).
 
 - New learnings about the mod API go into plan §9, and each task's status into `docs/phase-1-tasks.md`.
 - The default branch is protected and nobody can bypass the ruleset, so every change lands through a PR.
