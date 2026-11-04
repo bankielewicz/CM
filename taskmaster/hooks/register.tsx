@@ -10,7 +10,7 @@ import type { Register } from 'claude-code'
 import type { Io, SkillCapture, WatchedEvent } from '../types'
 import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
-import { contentHash, keepLatest, reason, SaveQueue, SKILLS_SHAPE, SkillTracker } from './skills'
+import { contentHash, keepLatest, reason, SaveQueue, SKILLS_SHAPE, SkillTracker, UNATTRIBUTED } from './skills'
 
 // The skills loaded this session, newest last. In $.state, which a hot reload keeps.
 const skillsAtom = atom({ plugin: 'taskmaster', key: 'skills' } as const, [] as SkillCapture[], { shape: SKILLS_SHAPE })
@@ -105,7 +105,7 @@ export const register: Register = (on, options) => {
   on('skill.prompt', ($, e, next) => {
     seen('skill.prompt')
     // Worked out first: the windows that say who loaded it are open now.
-    const { loop, via } = skills.attribute(e.skill)
+    const { loop, via } = e.frontmatter.context === 'fork' ? UNATTRIBUTED : skills.attribute(e.skill)
     // Saved after the hook answers: the engine holds the skill's load, and the
     // agent's first model request, until this hook does.
     saves.add(async () => {

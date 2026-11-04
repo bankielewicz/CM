@@ -13,6 +13,9 @@
 // Known limit: no event names the skills an agent preloads, so a starting agent
 // claims any skill. One that loads in those few milliseconds with no other claim
 // goes to that agent.
+//
+// A forked skill (`context: fork`) runs in a loop of its own, with no agent.spawn,
+// so whatever is open names the wrong loop. It's left unattributed.
 
 import type { SkillCapture, SkillLoop, SkillVia } from '../types'
 
@@ -63,7 +66,7 @@ export const reason = (error: unknown): string => (error instanceof Error ? erro
 export type Attribution = { loop: SkillLoop; via: SkillVia }
 
 const MAIN: SkillLoop = { kind: 'main' }
-const UNATTRIBUTED: Attribution = { loop: { kind: 'unknown' }, via: 'unattributed' }
+export const UNATTRIBUTED: Attribution = { loop: { kind: 'unknown' }, via: 'unattributed' }
 
 const loopOf = (agentId: string | undefined): SkillLoop => (agentId ? { kind: 'agent', agentId } : MAIN)
 const loopKey = (loop: SkillLoop): string => (loop.kind === 'agent' ? `agent:${loop.agentId}` : loop.kind)

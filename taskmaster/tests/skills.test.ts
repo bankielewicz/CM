@@ -645,3 +645,16 @@ test('known limit: a skill nothing else claims, while one agent starts, goes to 
   expect(capture.loop).toEqual({ kind: 'agent', agentId: 'agent-2' })
   expect(capture.via).toBe('agent-preload')
 })
+
+// Seen live on 2.1.318: the capture said main/skill-tool, while the skill's tool
+// calls all carried another agent's id, with no agent.spawn to name it.
+test('a forked skill stays unattributed: it runs in a loop of its own that nothing open names', async ($, on) => {
+  const forked = () => $.skill.prompt({ skill: 'forked', text: NOTES_TEXT, frontmatter: { context: 'fork' }, source: 'projectSettings' })
+  const world = engine(on, { during: { toolCall: e => (e.tool === 'Skill' ? forked() : Promise.resolve()) } })
+  await start($)
+  await $.tool.call({ tool: 'Skill', skill: 'forked' })
+
+  const capture = await only($, world)
+  expect(capture.loop).toEqual({ kind: 'unknown' })
+  expect(capture.via).toBe('unattributed')
+})
