@@ -31,8 +31,8 @@ const VERIFY: readonly RegExp[] = [
 const INDENTED = 'indented'
 const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/
 
-/** `inList`: a list was open when this line began. */
-type Line = { text: string; number: number; code?: { lang: string }; inList?: boolean }
+/** `fence`: the line is a code fence itself. `inList`: a list was open when this line began. */
+type Line = { text: string; number: number; code?: { lang: string; fence?: true }; inList?: boolean }
 
 /** A step and the lines that belong to it, for placing commands under steps. */
 type Span = { step: ParsedStep; end: number }
@@ -76,12 +76,13 @@ function classify(lines: { text: string; number: number }[]): Line[] {
   let inList = false
   let codeMayStart = true
   return lines.map(line => {
-    const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)/.exec(line.text)
     if (!fence) {
-      if (open?.[1]) {
+      const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)(.*)$/.exec(line.text)
+      // A backtick fence's opening line can't hold another backtick: that's inline code.
+      if (open?.[1] && !(open[1].startsWith('`') && open[3]?.includes('`'))) {
         fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase() }
         codeMayStart = false
-        return { ...line, code: { lang: '' } }
+        return { ...line, code: { lang: '', fence: true } }
       }
       const blank = line.text.trim() === ''
       if (!blank && !inList && codeMayStart && /^(?: {4}|\t)/.test(line.text)) return { ...line, code: { lang: INDENTED } }
@@ -95,7 +96,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
     const trimmed = line.text.trim()
     if (trimmed.startsWith(current.marker[0] ?? '`') && /^(`{3,}|~{3,})$/.test(trimmed) && trimmed.length >= current.marker.length) {
       fence = undefined
-      return { ...line, code: { lang: '' } }
+      return { ...line, code: { lang: '', fence: true } }
     }
     return { ...line, code: { lang: current.lang } }
   })
@@ -231,7 +232,7 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   let pending: { text: string; line: number } | undefined
   let heredocs: string[] = []
   for (const line of lines) {
-    const fence = /^\s*(`{3,}|~{3,})/.test(line.text)
+    const fence = line.code?.fence === true
     if (fence) {
       // A code block's end ends whatever was still open in it.
       pending = undefined

@@ -533,3 +533,23 @@ test('a plain bullet inside a checklist does not end it, and its command stays w
 test('a plain bullet still ends a numbered list', () => {
   expect(titles('1. a\n- plain\n2. b\n')).toEqual(['a'])
 })
+
+// ------------------------------------------------------------ Codex's comments after PR #9 merged
+
+test('a line wrapped in triple backticks is inline code, so what follows it still counts', () => {
+  const parsed = parseSkill(skill('```npm test```\n\n## Step 1: Implement\n\nYou MUST add a test.\n'), {})
+  expect(parsed.steps.map(step => step.title)).toEqual(['Implement'])
+  expect(parsed.rules.map(rule => rule.text)).toEqual(['You MUST add a test.'])
+  expect(parsed.verifyCandidates).toEqual([])
+  expect(titles('````x````\n1. Step\n')).toEqual(['Step'])
+})
+
+test("a backtick fence's opening line can't hold another backtick, while a tilde fence's can", () => {
+  expect(titles('``` a`b\n\n1. Step\n')).toEqual(['Step'])
+  expect(titles('~~~ a`b\n1. code\n~~~\n\n1. Real\n')).toEqual(['Real'])
+})
+
+test('a line that only looks like a fence, inside a code block, leaves an open heredoc alone', () => {
+  expect(commandsIn(shell('cat <<EOF', '```x```', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn('~~~bash\ncat <<EOF\n```\nnpm test\nEOF\nmake lint\n~~~\n')).toEqual(['make lint'])
+})
