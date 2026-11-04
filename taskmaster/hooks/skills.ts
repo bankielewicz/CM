@@ -32,6 +32,27 @@ export function keepLatest(list: readonly SkillCapture[], capture: SkillCapture)
   return [...list, capture].slice(-MAX_SKILLS)
 }
 
+/** The tag on what `$.state` keeps. A reload whose code names another tag reads the value as absent. */
+export const SKILLS_SHAPE = 'skills-1'
+
+/**
+ * Runs saves one at a time, in the order added, so captures land newest last and
+ * no hook waits on one. One that fails never stops the next. A hung save stops
+ * the later ones for this module instance, as a hung store does for the self-check.
+ */
+export class SaveQueue {
+  private last: Promise<unknown> = Promise.resolve()
+
+  add(save: () => Promise<void>): void {
+    this.last = this.last.then(save).catch(() => undefined)
+  }
+
+  /** Settles once everything added so far has finished. A later task waits on this rather than racing the saves. */
+  idle(): Promise<void> {
+    return this.last.then(() => undefined)
+  }
+}
+
 export type Attribution = { loop: SkillLoop; via: SkillVia }
 
 const MAIN: SkillLoop = { kind: 'main' }

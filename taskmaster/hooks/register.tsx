@@ -4,16 +4,16 @@
 // skill as it loads with the loop it belongs to (P1.1). Every hook passes its
 // event on unchanged, and nothing is shown.
 
-import { atom, update } from 'claude-code'
+import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { Io, SkillCapture, WatchedEvent } from '../types'
 import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
-import { contentHash, keepLatest, SkillTracker } from './skills'
+import { contentHash, keepLatest, SaveQueue, SKILLS_SHAPE, SkillTracker } from './skills'
 
 // The skills loaded this session, newest last. In $.state, which a hot reload keeps.
-const skillsAtom = atom({ plugin: 'taskmaster', key: 'skills' } as const, [] as SkillCapture[], { shape: 'skills-1' })
+const skillsAtom = atom({ plugin: 'taskmaster', key: 'skills' } as const, [] as SkillCapture[], { shape: SKILLS_SHAPE })
 
 export const register: Register = (on, options) => {
   // Module state starts over on a hot reload. The self-check's record is in
@@ -21,6 +21,12 @@ export const register: Register = (on, options) => {
   const config = parseConfig(options)
   const selfCheck = new SelfCheck()
   const skills = new SkillTracker()
+  const saves = new SaveQueue()
+  // The captures so far, read once from $.state. Only this module writes them,
+  // so a plain write needs no compare-and-set. That also keeps it clear of
+  // `update`, which retries on a read the docs say is one moment per dispatch.
+  // It's current once `saves` is idle, not when a hook answers.
+  let captured: SkillCapture[] | undefined
 
   // Notes an event for the self-check. It never waits on the store.
   const seen = (event: WatchedEvent): void => selfCheck.note(event)
@@ -83,28 +89,33 @@ export const register: Register = (on, options) => {
     return spawned
   })
 
-  on('skill.prompt', async ($, e, next) => {
+  on('skill.prompt', ($, e, next) => {
     seen('skill.prompt')
     // Worked out first: the windows that say who loaded it are open now.
     const { loop, via } = skills.attribute(e.skill)
-    try {
-      const capture: SkillCapture = {
-        skill: e.skill,
-        text: e.text,
-        frontmatter: e.frontmatter,
-        ...(e.frontmatterProblem === undefined ? {} : { frontmatterProblem: e.frontmatterProblem }),
-        source: e.source,
-        ...(e.pluginName === undefined ? {} : { pluginName: e.pluginName }),
-        ...(e.path === undefined ? {} : { path: e.path }),
-        hash: await contentHash(e.text),
-        loop,
-        via,
-        at: await $.clock.now(),
+    // Saved after the hook answers: the engine holds the skill's load, and the
+    // agent's first model request, until this hook does.
+    saves.add(async () => {
+      try {
+        const capture: SkillCapture = {
+          skill: e.skill,
+          text: e.text,
+          frontmatter: e.frontmatter,
+          ...(e.frontmatterProblem === undefined ? {} : { frontmatterProblem: e.frontmatterProblem }),
+          source: e.source,
+          ...(e.pluginName === undefined ? {} : { pluginName: e.pluginName }),
+          ...(e.path === undefined ? {} : { path: e.path }),
+          hash: await contentHash(e.text),
+          loop,
+          via,
+          at: await $.clock.now(),
+        }
+        captured = keepLatest(captured ?? (await read($, skillsAtom)), capture)
+        await $.state.set({ plugin: 'taskmaster', key: 'skills' }, { shape: SKILLS_SHAPE, value: captured })
+      } catch {
+        // A skill that can't be recorded still loads. Later tasks treat it as unknown.
       }
-      await update($, skillsAtom, list => keepLatest(list, capture))
-    } catch {
-      // A skill that can't be recorded still loads. Later tasks treat it as unknown.
-    }
+    })
     return next(e)
   })
 }

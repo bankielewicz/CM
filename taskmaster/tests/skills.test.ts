@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { contentHash, sameSkill, SkillTracker } from '../hooks/skills'
+import { contentHash, sameSkill, SaveQueue, SKILLS_SHAPE, SkillTracker } from '../hooks/skills'
 import type { SkillCapture } from '../types'
 import { engine, start, stateValue, until } from './engine'
 import type { World } from './engine'
@@ -313,4 +313,84 @@ test('two skills that load at once are both recorded', async ($, on) => {
 
   const all = await settled($, world)
   expect(all.map(capture => capture.skill).sort()).toEqual(['one', 'two'])
+})
+
+test('a hung $.state holds up no skill', { timeoutMs: 3_000 }, async ($, on) => {
+  engine(on, { hangStateWrites: true })
+  await start($)
+
+  const skill = await expand($)
+  expect(skill.text).toBe('engine skill text')
+})
+
+test('captures land in the order the skills loaded, even when the first write is slow', async ($, on) => {
+  const world = engine(on, { holdFirstStateWrite: true })
+  await start($)
+  const first = expand($, 'one')
+  await expand($, 'two')
+  world.releaseState()
+  await first
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill)).toEqual(['one', 'two'])
+})
+
+test('captures are written with their shape', async ($, on) => {
+  const world = engine(on)
+  await start($)
+  await settled($, world)
+
+  const written = world.state.get('taskmaster/skills') as { shape?: string; value?: unknown }
+  expect(written.shape).toBe(SKILLS_SHAPE)
+  expect(Array.isArray(written.value)).toBe(true)
+})
+
+test('what a reload kept is added to, not replaced', async ($, on) => {
+  const kept = { skill: 'kept', hash: 'abc', loop: { kind: 'main' }, via: 'typed', at: 1 }
+  const world = engine(on, { seedState: { 'taskmaster/skills': { shape: SKILLS_SHAPE, value: [kept] } } })
+  await start($)
+  await expand($, 'new')
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill)).toEqual(['kept', 'new'])
+})
+
+test('a save that fails does not stop the next', async () => {
+  const queue = new SaveQueue()
+  const ran: string[] = []
+  queue.add(async () => {
+    ran.push('one')
+    throw new Error('save failed')
+  })
+  queue.add(async () => {
+    ran.push('two')
+  })
+  await queue.idle()
+
+  expect(ran).toEqual(['one', 'two'])
+})
+
+test('saves run one at a time, and idle settles once they have finished', async () => {
+  const queue = new SaveQueue()
+  const ran: string[] = []
+  let finishFirst: () => void = () => {}
+  const firstHeld = new Promise<void>(resolve => {
+    finishFirst = resolve
+  })
+  queue.add(async () => {
+    ran.push('one started')
+    await firstHeld
+    ran.push('one finished')
+  })
+  queue.add(async () => {
+    ran.push('two')
+  })
+  const idle = queue.idle()
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(ran).toEqual(['one started'])
+
+  finishFirst()
+  await idle
+  expect(ran).toEqual(['one started', 'one finished', 'two'])
 })

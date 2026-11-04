@@ -231,7 +231,7 @@ export function engine(on: On, options: EngineOptions = {}): World {
     const seeded = options.seedState?.[`${e.plugin}/${e.key}`]
     // Only until the mod writes, as a value that a reload kept.
     if (seeded === undefined || world.state.has(`${e.plugin}/${e.key}`)) return next(e)
-    return { value: { value: seeded, version: 1 } } as never
+    return { value: { value: seeded, version: 0 } } as never
   })
   on('classic.SessionStart', () => {
     reach('classic.SessionStart')

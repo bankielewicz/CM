@@ -93,7 +93,7 @@ export type SkillCapture = {
   hash: string
   loop: SkillLoop
   via: SkillVia
-  /** When it loaded, from `$.clock.now()`. */
+  /** When it was recorded, just after it loaded, from `$.clock.now()`. */
   at: number
 }
 
