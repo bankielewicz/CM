@@ -305,6 +305,13 @@ function readShell(text: string, arithmetic: number): { segments: string[]; here
   return { segments, heredocs, arithmetic }
 }
 
+/** Counted from the end, because a regex retries from every backslash in a long run and goes quadratic. */
+function trailingBackslashes(text: string): number {
+  let run = 0
+  while (text[text.length - 1 - run] === '\\') run += 1
+  return run
+}
+
 function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   const found: VerifyCandidate[] = []
   const seen = new Set<string>()
@@ -331,7 +338,7 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
     const joined = pending ? `${pending.text} ${text}` : text
     const at = pending?.line ?? line.number
     // An even run is literal backslashes, so only an odd one continues the line.
-    if ((/\\*$/.exec(joined) as RegExpExecArray)[0].length % 2 === 1) {
+    if (trailingBackslashes(joined) % 2 === 1) {
       pending = { text: joined.slice(0, -1).trim(), line: at }
       continue
     }

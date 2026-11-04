@@ -764,3 +764,14 @@ test('any other tag stays lazy, as does text that only looks like a block tag', 
 test('a blockquote deeper than its list stays in the list', () => {
   expect(rulesIn('- a\n  > deeper\n\n    You MUST x\n')).toEqual(['MUST'])
 })
+
+test('a long run of backslashes inside a shell line takes linear time', () => {
+  const started = Date.now()
+  expect(commandsIn(shell(`echo ${'\\'.repeat(200000)}x`, 'npm test'))).toEqual(['npm test'])
+  expect(Date.now() - started).toBeLessThan(1000)
+})
+
+test('a long trailing run of backslashes still continues the line only when odd', () => {
+  expect(commandsIn(shell(`echo ${'\\'.repeat(200000)}`, 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell(`echo ${'\\'.repeat(200001)}`, 'npm test'))).toEqual([])
+})
