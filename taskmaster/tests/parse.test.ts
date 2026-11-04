@@ -780,3 +780,32 @@ test('a literal NUL in a title cannot be mistaken for what stands in for a code 
   expect(titles('1. \u00000\u0000 and `x`\n')).toEqual(['\u00000\u0000 and x'])
   expect(titles('1. `a\u0000b` c\n')).toEqual(['a\u0000b c'])
 })
+
+test("a line four past an item's content, after a blank line, is an indented code block", () => {
+  expect(rulesIn('- a\nlazy\n\n      MUST six\n')).toEqual([])
+  expect(rulesIn('- a\n\n      MUST six\n')).toEqual([])
+  expect(rulesIn('1. a\n\n       MUST seven\n')).toEqual([])
+})
+
+test("a line short of that is the item's own paragraph", () => {
+  expect(rulesIn('- a\n\n     MUST five\n')).toEqual(['MUST'])
+  expect(rulesIn('1. a\n\n      MUST six\n')).toEqual(['MUST'])
+})
+
+test("an item's content starts after up to four spaces, or one space past the marker when there are more", () => {
+  expect(rulesIn('-    a\n\n        MUST eight\n')).toEqual(['MUST'])
+  expect(rulesIn('-     a\n\n      MUST six\n')).toEqual([])
+})
+
+test('a spaced thematic break inside a list does not move what counts as content', () => {
+  expect(rulesIn('- a\n  - - -\n\n      MUST six\n')).toEqual([])
+})
+
+test("a nested item's own paragraph keeps its rule, at any depth", () => {
+  expect(rulesIn('- a\n  - b\n\n    MUST four\n')).toEqual(['MUST'])
+  expect(rulesIn('- a\n\n    - b\n\n      MUST six\n')).toEqual(['MUST'])
+})
+
+test('a list indented under a bullet stays nested, not a list of its own', () => {
+  expect(titles('- a\n\n    1. nested\n')).toEqual([])
+})

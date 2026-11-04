@@ -30,6 +30,8 @@ const VERIFY: readonly RegExp[] = [
 /** An indented code block's language: it has none, and isn't read for commands, which come from fences. */
 const INDENTED = 'indented'
 const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/
+/** A marker at any depth and the spaces after it. `LIST_ITEM` stops at 3, and an item nested deeper has content of its own. */
+const ANY_ITEM = /^(\s*(?:[-*+]|\d+[.)]))(\s+)/
 
 /**
  * `fence`: the line is a code fence itself. `indent`: the fence's, on the lines
@@ -72,12 +74,15 @@ function body(text: string): { text: string; number: number }[] {
 /**
  * Marks each line inside a code block: fenced, whatever the fence's indent, with
  * the block's language, or indented four spaces after a blank line. Inside a list
- * those indented lines are the item's own paragraphs, so they stay text and their
- * rules count. A list keeps its own indent, and ends as `endsList` says.
+ * that's four past the latest item's content, and anything shallower is the item's
+ * own paragraph, so it stays text and its rules count. A nested item moves that
+ * point, and one left behind errs towards keeping a rule. A list keeps its own
+ * indent, and ends as `endsList` says.
  */
 function classify(lines: { text: string; number: number }[]): Line[] {
   let fence: { marker: string; lang: string; indent: number } | undefined
   let listIndent: number | undefined
+  let contentIndent = 0
   let codeMayStart = true
   let afterText = false
   return lines.map(line => {
@@ -91,12 +96,14 @@ function classify(lines: { text: string; number: number }[]): Line[] {
         return { ...line, code: { lang: '', fence: true } }
       }
       const blank = line.text.trim() === ''
-      if (!blank && listIndent === undefined && codeMayStart && /^(?: {4}|\t)/.test(line.text)) return { ...line, code: { lang: INDENTED } }
+      if (!blank && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : line.text.search(/\S/) >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
       codeMayStart = blank
       const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}) }
       afterText = !blank
       // `* * *` and `- - -` have a list marker's shape, and are thematic breaks.
-      if (LIST_ITEM.test(line.text) && !THEMATIC_BREAK.test(line.text)) listIndent = Math.min(listIndent ?? Number.POSITIVE_INFINITY, line.text.search(/\S/))
+      const item = THEMATIC_BREAK.test(line.text) ? null : ANY_ITEM.exec(line.text)
+      if (item) contentIndent = (item[1] as string).length + ((item[2] as string).length > 4 ? 1 : (item[2] as string).length)
+      if (item && LIST_ITEM.test(line.text)) listIndent = Math.min(listIndent ?? Number.POSITIVE_INFINITY, line.text.search(/\S/))
       else if (listIndent !== undefined && endsList(marked, listIndent)) listIndent = undefined
       return marked
     }
