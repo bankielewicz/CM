@@ -225,7 +225,7 @@ test('a capture keeps the skill as it loaded, with a content hash and the time',
 
   const capture = await only($, world)
   expect(capture.skill).toBe('notes')
-  expect(capture.text).toBe(NOTES_TEXT)
+  expect('text' in capture).toBe(false)
   expect(capture.frontmatter).toEqual({ description: 'Write a note.', taskmaster: { mode: 'enforce' } })
   expect(capture.frontmatterProblem).toBe('a key was left out')
   expect(capture.source).toBe('plugin')
@@ -407,4 +407,47 @@ test('a capture that fails leaves one debug line and shows nothing', async ($, o
   expect(world.logs[0]?.text).toContain('clock.now')
   expect(world.logs[0]?.text).not.toContain(NOTES_TEXT)
   expect(world.shown).toEqual([])
+})
+
+// ------------------------------------------------- what the capture keeps
+
+const SECRET = 'secret-value'
+
+test('a typed command\'s arguments never reach $.state', async ($, on) => {
+  const world = engine(on)
+  await start($)
+  await $.skill.prompt({
+    skill: 'notes',
+    text: `Base directory for this skill: /repo/.claude/skills/notes\n\n${NOTES_TEXT}\n\n\nARGUMENTS: ${SECRET}`,
+    frontmatter: {},
+    source: 'projectSettings',
+  })
+  await settled($, world)
+
+  expect(JSON.stringify(world.state.get('taskmaster/skills'))).not.toContain(SECRET)
+})
+
+test('arguments a skill\'s body took in through $ARGUMENTS never reach $.state', async ($, on) => {
+  const world = engine(on)
+  await start($)
+  await $.skill.prompt({
+    skill: 'withargs',
+    text: `Base directory for this skill: /repo/.claude/skills/withargs\n\nReport these words back: ${SECRET}`,
+    frontmatter: {},
+    source: 'projectSettings',
+  })
+  await settled($, world)
+
+  expect(JSON.stringify(world.state.get('taskmaster/skills'))).not.toContain(SECRET)
+})
+
+test('what an earlier version kept, with its text, is read as absent', async ($, on) => {
+  const old = { skill: 'old', text: SECRET, hash: 'abc', loop: { kind: 'main' }, via: 'typed', at: 1 }
+  const world = engine(on, { seedState: { 'taskmaster/skills': { shape: 'skills-1', value: [old] } } })
+  await start($)
+  await expand($, 'new')
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill)).toEqual(['new'])
+  expect(JSON.stringify(world.state.get('taskmaster/skills'))).not.toContain(SECRET)
 })

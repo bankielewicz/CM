@@ -80,10 +80,13 @@ export type SkillLoop = { kind: 'main' } | { kind: 'agent'; agentId: string } | 
  */
 export type SkillVia = 'skill-tool' | 'typed' | 'agent-preload' | 'unattributed'
 
-/** A skill as it loaded (plan F1.1): what `skill.prompt` gave, a content hash, and its loop. */
+/**
+ * A skill as it loaded (plan F1.1): what `skill.prompt` gave, a content hash, and
+ * its loop. Not its text, which can hold the words of a typed command: a hook has
+ * that as `e.text`, and later the file at `path` has the skill itself.
+ */
 export type SkillCapture = {
   skill: string
-  text: string
   frontmatter: Readonly<Record<string, unknown>>
   frontmatterProblem?: string
   source: string

@@ -99,7 +99,6 @@ export const register: Register = (on, options) => {
       try {
         const capture: SkillCapture = {
           skill: e.skill,
-          text: e.text,
           frontmatter: e.frontmatter,
           ...(e.frontmatterProblem === undefined ? {} : { frontmatterProblem: e.frontmatterProblem }),
           source: e.source,
