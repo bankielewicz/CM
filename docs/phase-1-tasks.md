@@ -20,10 +20,11 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - `isReadOnly` read from the real call's `tool.check`,
   - a subagent's answer read from `turn.complete`.
 
-**Open questions for the owner** (neither blocks M0–M3)
-1. **Resume without the Plan Gate (P1.15).** F8.6 has the Plan Gate make a resumed run reload the skill, rebuild its tasks and read `HANDOFF.md` before any write. Phase 1 has no Plan Gate. Proposal: `/taskmaster resume` does the first two itself, and G3 blocks the stop until `HANDOFF.md` has been read.
-2. **Legitimate waits (P1.10).** Proposal: Phase 1 recognises a wait from `taskmaster_await_user`, or from a trailing "?" on the last message (F5's fast pre-check). The `$.model.classify` fallback arrives with Phase 2's question detection.
-3. **The spike after Gate A (P1.0b).** `CLAUDE.md` says to retire the spike and its coverage exemption once Gate A closes, in two PRs and only after the first real mod lands. Should the spike be deleted, or kept for re-checking new builds? The exemption entry is in a protected file, so only the owner can remove it.
+**Owner decisions** (2026-11-03, on the proposals this list first made)
+1. **Resume without the Plan Gate (P1.15).** F8.6 has the Plan Gate make a resumed run reload the skill, rebuild its tasks and read `HANDOFF.md` before any write, and Phase 1 has no Plan Gate. So `/taskmaster resume` reloads the skill and rebuilds the tasks itself, and G3 holds the stop until `HANDOFF.md` has been read.
+2. **Legitimate waits (P1.10, P1.17).** Phase 1 recognises a wait from `taskmaster_await_user`, or from a trailing "?" on the last message (F5's fast pre-check). A stop that a trailing "?" lets through is listed in the summary below the answer, so a question can't hide a skipped step. The `$.model.classify` fallback arrives with Phase 2's question detection.
+3. **The spike (P1.0b).** Delete it, in the two PRs and the order P1.0b gives.
+4. **`sentimentClassifier` waits** (PR #6 review). It's F13.3's optional label of your next prompt after a block. No Phase 1 task builds it, and a privacy setting that does nothing would mislead, so it isn't a setting yet. It comes back with the task that builds it.
 
 ## M0. Scaffold
 - [ ] P1.0 **Scaffold the mod** (F12, F14). Create `taskmaster/.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`, `types/` and `tests/`, with a test `engine()` helper like the spike's. Add the Phase 1 keys of `userConfig` (F12). At `session.start`, build the `Io` table and flush buffered early events. A startup self-check logs which events fired on this build (F14).
@@ -34,7 +35,39 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - whether the rule compares against a baseline from `main`.
 
   **Red:** loading the mod registers `session.start`, and the self-check records the events it saw. The config defaults match F12. **Done:** coverage ≥ 95%, validate and typecheck pass, and the mod loads in a terminal with nothing visible.
-- [ ] P1.0b **Retire the spike** (owner decision, open question 3). If the owner chooses deletion, use two PRs, in this order, and only after P1.0 is merged:
+
+  **Status (2026-11-03):**
+  - The mod is built: 52 tests pass, coverage is 100% of lines (97/97) and functions (44/44), and validate and the typecheck pass.
+  - A headless `claude -p --plugin-dir ./taskmaster` run loaded it and saved `self-check/2.1.317`, and no hook failed. With `maxStopBlocks: 99` and `checkpointDir: "/"` in its settings it still loaded: the original manifest refused the same settings with "hooks module did not load".
+  - **Review fixes** (PR #6's review, findings 1–10 and 12–14):
+    - An out-of-range setting no longer stops the mod loading: `plugin.json` declares no `min`/`max`, and `parseConfig` clamps instead.
+    - Folder settings outside the project and all-zero experiment weights are refused.
+    - The self-check never holds up an event. Its saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
+    - A failing version lookup keeps the record under `unknown`.
+    - Every observer's pass-through has its own test. The failing-store and choice tests were checked by mutation: each fails when the code it guards is removed.
+  - **Second review round** (`/code-review` of `6a50390`, findings 1–10):
+    - **#1:** a hung version lookup holds up no event. `session.start` no longer waits on it; each save does. A hang stops saves for that module instance.
+    - **#2:** the self-check starts even when `session.start`'s `next(e)` rejects, which the kit showed it can. The real engine is unproven (plan §9).
+    - **#3:** a folder setting inside `.git` falls back to its default.
+    - **#4, #5:** comments only. A record's `config` is the last saver's on this machine, and `plugin.json` declares no ranges.
+    - **#7, #8:** a running save loop picks up a new `session.start`'s `Io` and build, and events stored under one build no longer reach another build's record. Sessions that can't read their version still share `self-check/unknown`, on purpose.
+    - **Deferred:** #6, ±Infinity becomes the default, while `CHANGELOG.md` says "moved into the range". #9, this list never names `writeToolAllowlist`, `metricsWebhook`, `frontmatterNudges`, `checkpointGit: ref` or `rca: auto`.
+    - **No change:** #10, `WATCHES_EVERY_EVENT` in `selfcheck.ts` was reported as dead code, but it's an intentional compile-time guard.
+  - **Third review round** (`/code-review` of `e94578f`):
+    - An unusable version answer keeps the record under `unknown`, not a key like `self-check/undefined`.
+    - `plugin.json` and the plan no longer say metrics stay on the machine: by default they're committed with the checkpoints, so a push publishes them.
+    - **`plugin.json` drift:** a kit test can't read a file, so no test compares it with `DEFAULTS`. A changed default, a removed option and an added `min` or `max` are caught anyway, and a new test that sets every key catches a retyped key. A one-off comparison found no drift in any of the 20 keys.
+    - **Deferred (owner's decision):** a key removed from or added to `plugin.json` stays uncaught. The harm is small, a setting missing from `/config` or one that does nothing, and both show in the `plugin.json` diff.
+    - **`session.end` at exit:** the save survived one normal exit. The hook settled, the save followed 7 ms later, and the record lists the event. A hard kill wasn't tried.
+  - **Finding 11, moved to P1.16.** It noted that `WATCHED` leaves out `session.measure`, `classic.UserPromptSubmit` and `classic.SessionEnd`, and that nothing reads the record yet. P1.16's status will read the record. Each later task adds the events it depends on to `WATCHED`, for example `session.measure` with P1.13's context threshold.
+  - **The first coverage report** (PR #6's first CI run, on `3c7a39d`). `taskmaster` isn't exempt, so the gate wrote `coverage/cobertura-coverage.xml` (12,543 bytes) and the upload step ran for the first time.
+    - **The upload failed.** The log has `Coverage upload failed (HTTP 404): Not Found` as an error, and `Failed to send status report: HTTP Error 404`. The step and the `mod-coverage` job still passed, because `fail-on-error: false` turns upload errors into warnings. The workflow notes that uploads need Code Quality turned on, which would explain a 404; that's for the owner to check.
+    - **The ruleset's `code_coverage` rule reported nothing on the PR.** Its checks list only `mod-coverage` and `gate-guard`, so the rule had no upload to read.
+    - **No baseline from `main`.** Every earlier run on `main` was exempt and skipped the upload, and this one failed.
+
+    So the bar is enforced only by the `mod-coverage` check, as before.
+  - Checked in an interactive terminal (2026-11-03): loaded with `claude --debug --plugin-dir`, hot reloads and an exit worked, the debug logs show no failed hook, and the owner saw nothing from the mod.
+- [ ] P1.0b **Delete the spike** (owner decision 3). Two PRs, in this order, and only after P1.0 is merged:
   1. **Delete `spike/`.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`scripts/mod-coverage.mjs:331`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
   2. **Remove the exemption entry.** A second PR deletes the `spike/taskmaster-spike` entry from `coverage-exempt.json`. That file is protected: Claude can't edit it (`.claude/settings.json`), and `gate-guard` fails the PR until the owner lifts that check in the ruleset for it. `main` takes no direct pushes, so this step is a PR too.
 
@@ -74,11 +107,11 @@ Report the commands with their output. `main` is protected, so each task (or a s
 - [ ] P1.10 **G3: Stop gate, with F5 safety and the freshness gate** (F4, F5, F8.4). Block the stop while this loop's steps are uncovered, pending or in progress. The reason lists the step ids and the three ways out: do the step, waive it, or call `await_user`.
   - **Limits:** at most `maxStopBlocks` blocks per contract per user turn, and a new block only after the ledger has moved. After that, release the stop with `released: S3, S5 unverified` below the answer.
   - **Never block** with background tasks or crons running, on a `stop_hook_active` re-entry, or after `isAborted`.
-  - **Waits pass:** `await_user` this turn, or a trailing "?" (open question 2).
+  - **Waits pass:** `await_user` this turn, or a trailing "?" (owner decision 2). A stop let through by a trailing "?" is recorded, so P1.17 can list it below the answer.
   - **Fails open** (spike: `stop-block`).
   - **Freshness gate:** under the same cap, also block when there has been no checkpoint call since the last write call.
 
-  **Red:** a test per rule, including "no trapped session: the stop after the cap always passes" (Gate B safety: 0 trapped sessions). *Depends on P1.7. DoD 3.*
+  **Red:** a test per rule, including "no trapped session: the stop after the cap always passes" (Gate B safety: 0 trapped sessions), and one that a trailing "?" lets the stop through and records it. *Depends on P1.7. DoD 3.*
 - [ ] P1.11 **Strictness and the off switches** (§6, F9). `observe`, `advisory`, `enforce` and `strict` change what G1–G3 do: log, warn, deny/block, or strict mode's extras (a waiver needs the user's yes; the cap is 3 blocks). Esc (`isAborted`) freezes every gate for that turn, `/taskmaster off` always wins, and reference skills cause no blocks. **Red:** a table-driven test over §6's rows for G1–G3. *Depends on P1.8–P1.10. DoD 4.*
 
 ## M4. Checkpoints and resume (F8.1–F8.6)
@@ -113,7 +146,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - **`/taskmaster resume`:**
     - it reloads the skill, asking through `$.ui.ask` if the hash changed,
     - it seeds the tasks from the checkpoint,
-    - `HANDOFF.md` must be read before the stop goes through (open question 1).
+    - G3 holds the stop until `HANDOFF.md` has been read (owner decision 1).
   - **Staleness:** the git anchor and file hashes mark changed steps `needs re-verify`.
   - **`source: resume`:** gets only a light reminder.
 
@@ -125,13 +158,13 @@ Report the commands with their output. `main` is protected, so each task (or a s
   *Depends on P1.12. DoD 6.*
 
 ## M5. Control and visibility (F9, F11)
-- [ ] P1.16 **`/taskmaster` command** (F9). Status, `off | advisory | enforce | strict`, `waive <step> <reason>`, `contract show <skill>`, `checkpoint`, `runs`, `resume [run]`, `abandon [run]`, `report` and `exempt <skill>`. **Red:** a test of each subcommand's effect on state. *Depends on P1.11 and P1.15.*
+- [ ] P1.16 **`/taskmaster` command** (F9). Status (including which watched events fired on this build, read from P1.0's self-check record, and the settings, read from the live config because the record holds the last saver's), `off | advisory | enforce | strict`, `waive <step> <reason>`, `contract show <skill>`, `checkpoint`, `runs`, `resume [run]`, `abandon [run]`, `report` and `exempt <skill>`. **Red:** a test of each subcommand's effect on state. *Depends on P1.11 and P1.15.*
 - [ ] P1.17 **Status line, band, toasts, and the summary below the answer** (F11).
   - **Status line:** `skill · 3/7 · 1 waived`.
   - **Toasts:** shown on blocks.
-  - **Below each final answer:** under an active contract, the steps satisfied, waived and released.
+  - **Below each final answer:** under an active contract, the steps satisfied, waived and released, and any stop a trailing "?" let through (owner decision 2).
 
-  **Red:** UI mounted on `surface: 'terminal'`, with the test body looped over `['terminal', 'desktop']` (`CLAUDE.md`). *Depends on P1.10. DoD 1.*
+  **Red:** UI mounted on `surface: 'terminal'`, with the test body looped over `['terminal', 'desktop']` (`CLAUDE.md`). A stop let through by a trailing "?" appears in the summary. *Depends on P1.10. DoD 1.*
 
 ## M6. Metrics and experiments (F13.1–F13.4, plus F13.6 export)
 - [ ] P1.18 **Event log, run summary and export** (F13.1, F13.2, F13.6).

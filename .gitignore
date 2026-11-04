@@ -4,3 +4,6 @@
 # Coverage tooling
 node_modules/
 coverage/
+
+# Types the engine writes beside a mod it loads from a folder (CLAUDE.md: never committed)
+**/.claude-plugin/types/
