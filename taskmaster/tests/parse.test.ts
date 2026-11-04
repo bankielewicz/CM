@@ -374,7 +374,7 @@ test('&&, || and ; split commands only outside quotes', () => {
 test("a heredoc's body up to its terminator is not read for commands, in each of its spellings", () => {
   const spellings = ["cat >f <<'EOF'", 'cat >f <<"EOF"', 'cat >f <<EOF', 'cat >f << EOF', 'cat >f <<\\EOF', 'cat >f <<-EOF']
   for (const open of spellings) {
-    expect(commandsIn(shell(open, 'npm test', 'EOFX', 'EOF', 'make lint'))).toEqual(['make lint'])
+    expect(commandsIn(shell(open, 'EOFX', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
   }
 })
 
