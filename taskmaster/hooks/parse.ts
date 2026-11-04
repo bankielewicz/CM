@@ -169,6 +169,26 @@ function rules(lines: Line[]): ParsedRule[] {
   return found
 }
 
+/** One shell line's `&&`, `||` and `;` segments. It reads quotes and little else: this is not a shell parser. */
+function readShell(text: string): string[] {
+  const segments: string[] = []
+  let quote = ''
+  let start = 0
+  for (let at = 0; at < text.length; at += 1) {
+    const char = text[at]
+    if (char === '\\' && quote !== "'") at += 1
+    else if (quote) quote = char === quote ? '' : quote
+    else if (char === '"' || char === "'") quote = char
+    else if (char === ';' || text.startsWith('&&', at) || text.startsWith('||', at)) {
+      segments.push(text.slice(start, at))
+      start = at + (char === ';' ? 1 : 2)
+      at = start - 1
+    }
+  }
+  segments.push(text.slice(start))
+  return segments
+}
+
 function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   const found: VerifyCandidate[] = []
   const seen = new Set<string>()
@@ -183,7 +203,7 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
       continue
     }
     pending = undefined
-    for (const segment of joined.split(/&&|\|\||;/)) {
+    for (const segment of readShell(joined)) {
       const command = segment.trim().replace(/^([A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '')
       if (!VERIFY.some(pattern => pattern.test(command))) continue
       // Spans are in text order, so the last that contains the line is the innermost.

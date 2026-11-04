@@ -352,3 +352,25 @@ ${shell('npm run lint')}`
     ['npm run lint', 'S1'],
   ])
 })
+
+test('&&, || and ; split commands only outside quotes', () => {
+  const body = shell(
+    'npm test -- --grep "a;b"',
+    'echo "x; npm test"',
+    "echo 'y && make check'",
+    'npm run lint -- --filter "c\\"d;e"',
+    'echo \\"f; cargo test',
+    "echo 'g\\'; make check",
+    'echo "it\'s; npm run build"',
+    "echo 'say \"hi'; go build",
+    'echo h || go vet',
+  )
+  expect(commandsIn(body)).toEqual([
+    'npm test -- --grep "a;b"',
+    'npm run lint -- --filter "c\\"d;e"',
+    'cargo test',
+    'make check',
+    'go build',
+    'go vet',
+  ])
+})
