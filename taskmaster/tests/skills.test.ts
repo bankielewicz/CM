@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { contentHash, sameSkill, SkillTracker } from '../hooks/skills'
 import type { SkillCapture } from '../types'
-import { engine, start, stateValue } from './engine'
+import { engine, start, stateValue, until } from './engine'
 import type { World } from './engine'
 
 // P1.1: capture each skill as it loads, and work out which loop it belongs to.
@@ -50,8 +50,22 @@ function spawn($: Engine) {
   })
 }
 
-const only = (world: World): SkillCapture => {
-  const all = captures(world)
+const SENTINEL = 'settled-sentinel'
+
+/**
+ * Every capture from the events raised so far. Saves can land after the hook
+ * answers, but they land in the order the skills loaded. So one more skill, seen
+ * as the newest capture, shows that all those before it have landed. Waiting for
+ * a count wouldn't: a test expecting one capture couldn't see a second still to come.
+ */
+async function settled($: Engine, world: World): Promise<SkillCapture[]> {
+  await expand($, SENTINEL)
+  await until(world, () => captures(world).at(-1)?.skill === SENTINEL)
+  return captures(world).filter(capture => capture.skill !== SENTINEL)
+}
+
+const only = async ($: Engine, world: World): Promise<SkillCapture> => {
+  const all = await settled($, world)
   expect(all).toHaveLength(1)
   return all[0] as SkillCapture
 }
@@ -63,7 +77,7 @@ test('a skill the Skill tool loads on the main loop belongs to the main loop', a
   await start($)
   await $.tool.call({ tool: 'Skill', skill: 'notes' })
 
-  const capture = only(world)
+  const capture = await only($, world)
   expect(capture.loop).toEqual({ kind: 'main' })
   expect(capture.via).toBe('skill-tool')
 })
@@ -73,7 +87,7 @@ test('a skill the Skill tool loads in a subagent belongs to that subagent', asyn
   await start($)
   await $.tool.call({ tool: 'Skill', skill: 'notes', agentId: 'agent-1' })
 
-  const capture = only(world)
+  const capture = await only($, world)
   expect(capture.loop).toEqual({ kind: 'agent', agentId: 'agent-1' })
   expect(capture.via).toBe('skill-tool')
 })
@@ -83,7 +97,7 @@ test('a skill typed as /name belongs to the main loop', async ($, on) => {
   await start($)
   await typed($, 'notes')
 
-  const capture = only(world)
+  const capture = await only($, world)
   expect(capture.loop).toEqual({ kind: 'main' })
   expect(capture.via).toBe('typed')
 })
@@ -94,7 +108,7 @@ test('a skill preloaded into a spawned agent belongs to that agent', async ($, o
   await spawn($)
   await expand($)
 
-  const capture = only(world)
+  const capture = await only($, world)
   expect(capture.loop).toEqual({ kind: 'agent', agentId: 'agent-2' })
   expect(capture.via).toBe('agent-preload')
 })
@@ -106,7 +120,7 @@ test('a skill that loads with nothing open is left unattributed', async ($, on) 
   await start($)
   await expand($)
 
-  const capture = only(world)
+  const capture = await only($, world)
   expect(capture.loop).toEqual({ kind: 'unknown' })
   expect(capture.via).toBe('unattributed')
 })
@@ -118,7 +132,7 @@ test('an agent stops being a preload target at its first tool call', async ($, o
   await $.tool.call({ tool: 'Read', file_path: '/repo/a.txt', agentId: 'agent-2' })
   await expand($)
 
-  expect((only(world)).via).toBe('unattributed')
+  expect((await only($, world)).via).toBe('unattributed')
 })
 
 test('an agent stops being a preload target when its turn ends', async ($, on) => {
@@ -128,7 +142,7 @@ test('an agent stops being a preload target when its turn ends', async ($, on) =
   await $.turn.complete({ answer: 'done', durationMs: 5, isAborted: false, turnId: 'turn-a2', agentId: 'agent-2', reason: 'answer' })
   await expand($)
 
-  expect((only(world)).via).toBe('unattributed')
+  expect((await only($, world)).via).toBe('unattributed')
 })
 
 test('with two agents starting at once, a preloaded skill is left unattributed', async ($, on) => {
@@ -138,7 +152,7 @@ test('with two agents starting at once, a preloaded skill is left unattributed',
   await spawn($)
   await expand($)
 
-  expect((only(world)).loop).toEqual({ kind: 'unknown' })
+  expect((await only($, world)).loop).toEqual({ kind: 'unknown' })
 })
 
 test('a refused spawn starts no agent', async ($, on) => {
@@ -148,7 +162,7 @@ test('a refused spawn starts no agent', async ($, on) => {
   await expand($)
 
   expect(refused.deny).toBe('engine refused the spawn')
-  expect((only(world)).via).toBe('unattributed')
+  expect((await only($, world)).via).toBe('unattributed')
 })
 
 test('a typed command attributes only while its prompt is being submitted', async ($, on) => {
@@ -157,7 +171,7 @@ test('a typed command attributes only while its prompt is being submitted', asyn
   await typed($, 'notes')
   await expand($)
 
-  expect((only(world)).via).toBe('unattributed')
+  expect((await only($, world)).via).toBe('unattributed')
 })
 
 test('a Skill call for one skill does not claim another', async ($, on) => {
@@ -165,7 +179,7 @@ test('a Skill call for one skill does not claim another', async ($, on) => {
   await start($)
   await $.tool.call({ tool: 'Skill', skill: 'notes' })
 
-  const capture = only(world)
+  const capture = await only($, world)
   expect(capture.skill).toBe('deploy')
   expect(capture.via).toBe('unattributed')
 })
@@ -181,7 +195,7 @@ test('a plugin-qualified name matches the bare one, either way round', async ($,
   await $.tool.call({ tool: 'Skill', skill: 'acme:notes' })
   await typed($, 'notes')
 
-  const all = captures(world)
+  const all = await settled($, world)
   expect(all.map(capture => capture.via)).toEqual(['skill-tool', 'typed'])
 })
 
@@ -209,7 +223,7 @@ test('a capture keeps the skill as it loaded, with a content hash and the time',
     path: '/home/me/.claude/plugins/acme/skills/notes/SKILL.md',
   })
 
-  const capture = only(world)
+  const capture = await only($, world)
   expect(capture.skill).toBe('notes')
   expect(capture.text).toBe(NOTES_TEXT)
   expect(capture.frontmatter).toEqual({ description: 'Write a note.', taskmaster: { mode: 'enforce' } })
@@ -232,6 +246,8 @@ test('only the last 20 skills are kept, newest last', async ($, on) => {
   await start($)
   for (let n = 1; n <= 21; n += 1) await expand($, `skill-${n}`)
 
+  // Named here: one more skill, as `settled` adds, would push out a capture.
+  await until(world, () => captures(world).at(-1)?.skill === 'skill-21')
   const all = captures(world)
   expect(all).toHaveLength(20)
   expect(all[0]?.skill).toBe('skill-2')
@@ -257,11 +273,8 @@ test('the skill, the Skill call, the typed prompt and the spawn all pass through
   expect(spawned.agentId).toBe('agent-2')
 })
 
-// The kit can't tell skill.prompt's catch from the engine's own handling: a
-// hook that throws is skipped, and the event passes on either way (checked by
-// mutation). The catch keeps a "hook skipped" line out of a live session.
 test('a skill that can\'t be recorded still passes through', async ($, on) => {
-  const world = engine(on, { failStateWrites: true })
+  engine(on, { failClock: true })
   await start($)
 
   const skill = await expand($)
@@ -285,5 +298,5 @@ test('a Skill call no longer claims the skill once it has answered', async ($, o
   await $.tool.call({ tool: 'Skill', skill: 'notes' })
   await expand($)
 
-  expect(only(world).via).toBe('unattributed')
+  expect((await only($, world)).via).toBe('unattributed')
 })
