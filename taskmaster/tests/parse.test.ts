@@ -374,3 +374,41 @@ test('&&, || and ; split commands only outside quotes', () => {
     'go vet',
   ])
 })
+
+test("a heredoc's body up to its terminator is not read for commands, in each of its spellings", () => {
+  const spellings = ["cat >f <<'EOF'", 'cat >f <<"EOF"', 'cat >f <<EOF', 'cat >f << EOF', 'cat >f <<\\EOF', 'cat >f <<-EOF']
+  for (const open of spellings) {
+    expect(commandsIn(shell(open, 'npm test', 'EOFX', 'EOF', 'make lint'))).toEqual(['make lint'])
+  }
+})
+
+test('a heredoc inside a list item ends at its indented terminator', () => {
+  const body = `1. Write it.
+
+   \`\`\`bash
+   cat >f <<EOF
+   npm test
+   EOF
+   make lint
+   \`\`\`
+`
+  expect(commandsIn(body)).toEqual(['make lint'])
+})
+
+test('two heredocs on one line are skipped in turn, and the rest of their line still counts', () => {
+  expect(commandsIn(shell('cat <<A <<B && npm run build', 'npm test', 'A', 'make lint', 'B', 'go vet'))).toEqual(['npm run build', 'go vet'])
+})
+
+test('a heredoc with no terminator ends with its code block', () => {
+  expect(commandsIn(`${shell('cat <<EOF', 'npm test')}\n${shell('make lint')}`)).toEqual(['make lint'])
+})
+
+test('a here-string, or << in quotes or a comment, opens no heredoc', () => {
+  for (const line of ['grep x <<< EOF', 'echo "<<EOF"', "echo '<<EOF'", '# see <<EOF', 'echo a # see <<EOF', 'echo $((1 << 2))']) {
+    expect(commandsIn(shell(line, 'npm test'))).toEqual(['npm test'])
+  }
+})
+
+test('a comment is not read for commands, while a # inside a word is not a comment', () => {
+  expect(commandsIn(shell('echo a # npm test; make check', 'echo a#b; go vet'))).toEqual(['go vet'])
+})

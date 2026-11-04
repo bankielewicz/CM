@@ -169,32 +169,52 @@ function rules(lines: Line[]): ParsedRule[] {
   return found
 }
 
-/** One shell line's `&&`, `||` and `;` segments. It reads quotes and little else: this is not a shell parser. */
-function readShell(text: string): string[] {
+const HEREDOC = /^<<(?!<)-?\s*(?:\\|['"])?([A-Za-z_]\w*)/
+
+/**
+ * One shell line's `&&`, `||` and `;` segments, and the terminators of any
+ * heredocs it opens. It reads quotes and comments, and little else: this is not
+ * a shell parser.
+ */
+function readShell(text: string): { segments: string[]; heredocs: string[] } {
   const segments: string[] = []
+  const heredocs: string[] = []
   let quote = ''
   let start = 0
-  for (let at = 0; at < text.length; at += 1) {
+  let end = text.length
+  for (let at = 0; at < end; at += 1) {
     const char = text[at]
     if (char === '\\' && quote !== "'") at += 1
     else if (quote) quote = char === quote ? '' : quote
     else if (char === '"' || char === "'") quote = char
+    else if (char === '#' && (at === 0 || /\s/.test(text[at - 1] as string))) end = at
     else if (char === ';' || text.startsWith('&&', at) || text.startsWith('||', at)) {
       segments.push(text.slice(start, at))
       start = at + (char === ';' ? 1 : 2)
       at = start - 1
+    } else if (char === '<' && text[at - 1] !== '<') {
+      const terminator = HEREDOC.exec(text.slice(at))?.[1]
+      if (terminator) heredocs.push(terminator)
     }
   }
-  segments.push(text.slice(start))
-  return segments
+  segments.push(text.slice(start, end))
+  return { segments, heredocs }
 }
 
 function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   const found: VerifyCandidate[] = []
   const seen = new Set<string>()
   let pending: { text: string; line: number } | undefined
+  let heredocs: string[] = []
   for (const line of lines) {
-    if (!line.code || !SHELLS.has(line.code.lang) || /^\s*(`{3,}|~{3,})/.test(line.text)) continue
+    const fence = /^\s*(`{3,}|~{3,})/.test(line.text)
+    if (fence) heredocs = []
+    if (!line.code || !SHELLS.has(line.code.lang) || fence) continue
+    if (heredocs.length > 0) {
+      // Trimmed, not exact: a block inside a list item indents its terminator too.
+      if (line.text.trim() === heredocs[0]) heredocs.shift()
+      continue
+    }
     const text = line.text.trim().replace(/^\$\s+/, '')
     const joined = pending ? `${pending.text} ${text}` : text
     const at = pending?.line ?? line.number
@@ -203,7 +223,9 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
       continue
     }
     pending = undefined
-    for (const segment of readShell(joined)) {
+    const shell = readShell(joined)
+    heredocs = shell.heredocs
+    for (const segment of shell.segments) {
       const command = segment.trim().replace(/^([A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '')
       if (!VERIFY.some(pattern => pattern.test(command))) continue
       // Spans are in text order, so the last that contains the line is the innermost.
