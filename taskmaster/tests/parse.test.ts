@@ -490,3 +490,10 @@ test('indented lines are code again once a list has ended', () => {
   expect(parseSkill(skill('- item\n\nA paragraph.\n\n    You MUST not see this.\n'), {}).rules).toEqual([])
   expect(parseSkill(skill('- item\n\n## Next\n\n    You MUST not see this.\n'), {}).rules).toEqual([])
 })
+
+test('the string form of allowed-tools splits on commas and spaces only outside parentheses', () => {
+  const tools = (value: string): string[] => parseSkill(skill(''), { 'allowed-tools': value }).allowedTools
+  expect(tools('Read, Bash(sed -n 1,20p:*), Grep')).toEqual(['Read', 'Bash(sed -n 1,20p:*)', 'Grep'])
+  expect(tools('Bash(a (b, c) d:*) Read')).toEqual(['Bash(a (b, c) d:*)', 'Read'])
+  expect(tools('Read) Bash(x y)')).toEqual(['Read)', 'Bash(x y)'])
+})

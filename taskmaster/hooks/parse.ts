@@ -275,9 +275,26 @@ function meta(frontmatter: Readonly<Record<string, unknown>>): Pick<ParsedSkill,
   }
 }
 
-/** A comma or space-separated string, or a list. Spaces inside parentheses, as in `Bash(git commit:*)`, don't split. */
+/** A comma or space-separated string, or a list. */
 function tools(value: unknown): string[] {
-  const raw = typeof value === 'string' ? value.split(/,|\s+(?![^()]*\))/) : Array.isArray(value) ? value : []
+  const raw = typeof value === 'string' ? splitTools(value) : Array.isArray(value) ? value : []
   const names = raw.filter((name): name is string => typeof name === 'string').map(name => name.trim()).filter(Boolean)
   return [...new Set(names)]
+}
+
+/** Splits only outside parentheses, so `Bash(sed -n 1,20p:*)` stays whole. */
+function splitTools(value: string): string[] {
+  const names: string[] = []
+  let current = ''
+  let depth = 0
+  for (const char of value) {
+    if (char === '(') depth += 1
+    if (char === ')') depth = Math.max(0, depth - 1)
+    if (depth === 0 && /[,\s]/.test(char)) {
+      names.push(current)
+      current = ''
+    } else current += char
+  }
+  names.push(current)
+  return names
 }
