@@ -286,7 +286,8 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
     const text = line.text.trim().replace(/^\$\s+/, '')
     const joined = pending ? `${pending.text} ${text}` : text
     const at = pending?.line ?? line.number
-    if (joined.endsWith('\\')) {
+    // An even run is literal backslashes, so only an odd one continues the line.
+    if ((/\\*$/.exec(joined) as RegExpExecArray)[0].length % 2 === 1) {
       pending = { text: joined.slice(0, -1).trim(), line: at }
       continue
     }

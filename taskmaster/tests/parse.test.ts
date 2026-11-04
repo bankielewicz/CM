@@ -632,3 +632,9 @@ test('a single parenthesis is not arithmetic, so a heredoc inside one still open
   expect(commandsIn(shell('x=$(cat <<EOF', 'npm test', 'EOF', ')', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('(cat <<EOF', 'npm test', 'EOF', ')', 'make lint'))).toEqual(['make lint'])
 })
+
+test('only an odd number of trailing backslashes continues a line', () => {
+  expect(commandsIn(shell("printf '%s\\n' foo\\\\", 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('cargo test \\', '--all'))).toEqual(['cargo test --all'])
+  expect(commandsIn(shell('cargo test \\\\\\', '--all'))).toEqual(['cargo test \\\\ --all'])
+})
