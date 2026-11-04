@@ -4,7 +4,7 @@
 // skill as it loads with the loop it belongs to (P1.1). Every hook passes its
 // event on unchanged, and nothing is shown.
 
-import { atom, update } from 'claude-code'
+import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { Io, SkillCapture, WatchedEvent } from '../types'
@@ -12,10 +12,10 @@ import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
 import { fromFrontmatter, fromOverride, overrideFile, resolveDeclared } from './contract'
 import type { Tier } from './contract'
-import { contentHash, keepLatest, SkillTracker } from './skills'
+import { contentHash, keepLatest, reason, SaveQueue, SKILLS_SHAPE, SkillTracker, UNATTRIBUTED } from './skills'
 
 // The skills loaded this session, newest last. In $.state, which a hot reload keeps.
-const skillsAtom = atom({ plugin: 'taskmaster', key: 'skills' } as const, [] as SkillCapture[], { shape: 'skills-2' })
+const skillsAtom = atom({ plugin: 'taskmaster', key: 'skills' } as const, [] as SkillCapture[], { shape: SKILLS_SHAPE })
 
 export const register: Register = (on, options) => {
   // Module state starts over on a hot reload. The self-check's record is in
@@ -23,6 +23,12 @@ export const register: Register = (on, options) => {
   const config = parseConfig(options)
   const selfCheck = new SelfCheck()
   const skills = new SkillTracker()
+  const saves = new SaveQueue()
+  // The captures so far, read once from $.state. Only this module writes them,
+  // so a plain write needs no compare-and-set. That also keeps it clear of
+  // `update`, which retries on a read the docs say is one moment per dispatch.
+  // It's current once `saves` is idle, not when a hook answers.
+  let captured: SkillCapture[] | undefined
 
   // Notes an event for the self-check. It never waits on the store.
   const seen = (event: WatchedEvent): void => selfCheck.note(event)
@@ -57,6 +63,15 @@ export const register: Register = (on, options) => {
   on('classic.PostCompact', (_, e, next) => { seen('classic.PostCompact'); return next(e) })
   on('classic.Stop', (_, e, next) => { seen('classic.Stop'); return next(e) })
   on('classic.TaskCompleted', (_, e, next) => { seen('classic.TaskCompleted'); return next(e) })
+  on('classic.SubagentStop', (_, e, next) => { seen('classic.SubagentStop'); skills.acted(e.agent_id); return next(e) })
+  // A streaming event, so its hook must be an async generator. An agent's preloads
+  // are in place before its first model request, so that request ends its window.
+  // Not its turn.start, which fires before the preload (seen live on 2.1.318).
+  on('turn.step', async function* (_, e, next) {
+    seen('turn.step')
+    skills.acted(e.agentId)
+    return yield* next(e)
+  })
 
   // P1.1: what is open when a skill loads says which loop it belongs to.
   on('tool.call', { tool: 'Skill' }, async (_, e, next) => {
@@ -75,57 +90,68 @@ export const register: Register = (on, options) => {
       return await next(e)
     } finally {
       if (typed !== undefined) skills.typedClosed(typed)
+      skills.promptEnded()
     }
   })
 
   on('agent.spawn', async (_, e, next) => {
     seen('agent.spawn')
     const spawned = await next(e)
-    if (typeof spawned.agentId === 'string') skills.spawned(spawned.agentId)
+    // No preload window for these. A teammate in its own pane and a workflow's
+    // remote agent fire nothing here to close one, and preloads come before an
+    // agent's first turn, not on a resume.
+    if (typeof spawned.agentId === 'string' && !e.isTeammate && !e.workflow && !e.resume) skills.spawned(spawned.agentId)
     return spawned
   })
 
   on('skill.prompt', async ($, e, next) => {
     seen('skill.prompt')
     // Worked out first: the windows that say who loaded it are open now.
-    const { loop, via } = skills.attribute(e.skill)
-    try {
-      // P1.3: the declared contract. An override file is read only when the
-      // frontmatter gives none, and a missing file declares nothing.
-      const frontmatter = fromFrontmatter(e.frontmatter, e.frontmatterProblem)
-      let override: Tier | undefined
-      if (!frontmatter.contract) {
-        let file: string | undefined
-        try {
-          const root = (await $.session.root()).replace(/\/+$/, '')
-          file = await $.fs.read(`${root}/${config.overrideDir}/${overrideFile(e.skill)}`)
-        } catch {
-          // No override file.
-        }
-        override = fromOverride(file)
+    const { loop, via } = e.frontmatter.context === 'fork' ? UNATTRIBUTED : skills.attribute(e.skill)
+    // P1.3: the declared contract. This hook waits for it, because it's what P1.4
+    // and P1.5 build their answer from. An override file is read only when the
+    // frontmatter gives none, and a missing file declares nothing.
+    const frontmatter = fromFrontmatter(e.frontmatter, e.frontmatterProblem)
+    let override: Tier | undefined
+    if (!frontmatter.contract) {
+      let file: string | undefined
+      try {
+        const root = (await $.session.root()).replace(/\/+$/, '')
+        file = await $.fs.read(`${root}/${config.overrideDir}/${overrideFile(e.skill)}`)
+      } catch {
+        // No override file.
       }
-      const declared = resolveDeclared(frontmatter, override)
-      for (const problem of declared.problems) {
-        $.ui.log(`taskmaster: ${e.skill}: ${problem.where} contract set aside: ${problem.message}`, { to: 'debug' })
-      }
-      const capture: SkillCapture = {
-        skill: e.skill,
-        text: e.text,
-        frontmatter: e.frontmatter,
-        ...(e.frontmatterProblem === undefined ? {} : { frontmatterProblem: e.frontmatterProblem }),
-        source: e.source,
-        ...(e.pluginName === undefined ? {} : { pluginName: e.pluginName }),
-        ...(e.path === undefined ? {} : { path: e.path }),
-        hash: await contentHash(e.text),
-        loop,
-        via,
-        at: await $.clock.now(),
-        declared,
-      }
-      await update($, skillsAtom, list => keepLatest(list, capture))
-    } catch {
-      // A skill that can't be recorded still loads. Later tasks treat it as unknown.
+      override = fromOverride(file)
     }
+    const declared = resolveDeclared(frontmatter, override)
+    for (const problem of declared.problems) {
+      $.ui.log(`taskmaster: ${e.skill}: ${problem.where} contract set aside: ${problem.message}`, { to: 'debug' })
+    }
+    // Saved after the hook answers: recording is nothing it needs to answer, and
+    // the engine holds the skill's load, and the agent's first model request, until
+    // this hook does.
+    saves.add(async () => {
+      try {
+        const capture: SkillCapture = {
+          skill: e.skill,
+          frontmatter: e.frontmatter,
+          ...(e.frontmatterProblem === undefined ? {} : { frontmatterProblem: e.frontmatterProblem }),
+          source: e.source,
+          ...(e.pluginName === undefined ? {} : { pluginName: e.pluginName }),
+          ...(e.path === undefined ? {} : { path: e.path }),
+          hash: await contentHash(e.text),
+          loop,
+          via,
+          at: await $.clock.now(),
+          declared,
+        }
+        captured = keepLatest(captured ?? (await read($, skillsAtom)), capture)
+        await $.state.set({ plugin: 'taskmaster', key: 'skills' }, { shape: SKILLS_SHAPE, value: captured })
+      } catch (error) {
+        // A skill that can't be recorded still loads. Later tasks treat it as unknown.
+        $.ui.log(`taskmaster: couldn't record skill ${e.skill}: ${reason(error)}`, { to: 'debug' })
+      }
+    })
     return next(e)
   })
 }

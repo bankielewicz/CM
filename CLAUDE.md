@@ -53,15 +53,15 @@ How the bar is enforced:
 - `hooks/register.tsx` registers every hook. At `session.start` it builds the `Io` table (`types/index.d.ts`), the engine calls helpers get in place of `$`.
 - `hooks/config.ts` holds `DEFAULTS` (plan F12's Phase 1 keys) and `parseConfig`. That function holds what `register(on, options)` receives to each key's choices and range. `plugin.json`'s `userConfig` declares the same defaults, and a test checks both against F12, reading `plugin.json`'s through the options the kit fills in. A key retyped there fails the test that sets every key, because the kit refuses an option that doesn't fit its declared type. A key removed or added there isn't caught, because `parseConfig` falls back to `DEFAULTS` and undeclared options still arrive.
 - `hooks/selfcheck.ts` is the startup self-check (F14). It keeps one record per Claude Code build in `$.store`, under `self-check/<build>`, listing which of the events in `WATCHED` have fired there, and the settings of the last session to save it. `note()` returns at once. Saves run one at a time, merge the stored record before each write, and write nothing after a failed read.
-- `hooks/skills.ts` captures each skill as it loads and works out its loop (P1.1). `SkillTracker` holds what is open when `skill.prompt` fires: `Skill` calls, a typed command being submitted, and spawned agents that haven't acted. The captures are kept in `$.state` as `taskmaster.skills`.
+- `hooks/skills.ts` captures each skill as it loads and works out its loop (P1.1). `SkillTracker` holds what is open when `skill.prompt` fires: `Skill` calls, a typed command being submitted, and spawned agents that haven't reached their first model request. Each can claim a skill, and two loops claiming leaves it unattributed. The captures are kept in `$.state` as `taskmaster.skills`, with no skill text. `SaveQueue` saves them one at a time after the hook answers, and `register.tsx` holds the list, so it's current once `saves.idle()` settles, not when a hook answers.
 - `hooks/parse.ts` is the deterministic parse (P1.2): `parseSkill(text, frontmatter)` returns steps, rules, verify candidates and the frontmatter keys F1.2 names. It's pure and not yet wired; P1.4 uses it.
 - `hooks/contract.ts` is the declared contract (P1.3): `validateDeclared` (strict, all-or-nothing), the frontmatter and override tiers, `resolveDeclared` (frontmatter beats an override) and `pickTier` (principle 1's full order, unwired until P1.4).
 - `types/index.d.ts` holds the mod's own types, and its `$.state` contract.
-- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write, make the version lookup fail, hang or give any answer, make `session.start` itself fail, run a callback inside an event's answer (`during`: the engine expanding a skill mid-call), set what `agent.spawn` answers, make `$.state` writes fail, and serve files to `$.fs.read` (`files`). It records what the mod read (`reads`) and logged (`logs`), and a `$.ui.log` line headed for the transcript counts as shown. A test's `$` has no state noun, so `stateValue(world, 'plugin/key')` reads the mod's latest `$.state` write. Saves run after the hook answers, so a test waits for one with `untilSeen` or `untilSaved`.
+- `tests/engine.ts` is the engine beneath the mod in tests. `engine(on, options)` answers each `$` call and returns what the mod stored, showed and passed on (`reached`). Its options make the store fail, hang or hold a write, make the version lookup fail, hang or give any answer, make `session.start` itself fail, run a callback inside an event's answer (`during`: the engine expanding a skill mid-call), set what `agent.spawn` answers, hang or hold a `$.state` write, seed `$.state`, make `$.clock.now()` fail, and serve files to `$.fs.read` (`files`). They can't make a `$.state` write fail, because the kit answers beneath it. It records what the mod read (`reads`) and logged (`logs`), and a `$.ui.log` line headed for the transcript counts as shown. A test's `$` has no state noun, so `stateValue(world, 'plugin/key')` reads the mod's latest `$.state` write. Saves run after the hook answers, so a test waits for one with `untilSeen`, `untilSaved` or `until`. `settled` in `skills.test.ts` waits for every capture so far.
 
 ## Mod API constraints
 
-These were learned live on build 2.1.317 and apply to the real mod too. Plan §9 ("Learned while building the spike") has the full list; read it before writing hook code.
+These were learned live on builds 2.1.317 and 2.1.318 and apply to the real mod too. Plan §9 ("Learned while building the spike") has the full list; read it before writing hook code.
 
 - `$` can't be passed, bound or stored. Spell every call `$.noun.method(...)` where it's made. `session.start` builds one table of closures (`Io` in `register.tsx`) for helpers to use, and hooks that fire earlier buffer their data.
 - `atom({ plugin, key })` must name both as string literals, not constants.
@@ -70,14 +70,16 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 - The engine's helper agents also raise `SubagentStop`. Gate only agents seen through `agent.spawn`, and read a subagent's answer from `turn.complete`.
 - A hook passed to `on` must be a function literal, or the name of one. A call that returns a hook, such as `on('x', observe('x'))`, stops the module loading.
 - Declare no `min` or `max` on a `userConfig` number. The engine refuses to load the module when a stored value is outside them, which switches the whole mod off. Clamp in `parseConfig` instead. A string outside its `options` arrives as unset, so `options` are safe to keep for the `/config` picker.
-- Don't make a hook wait on `$.store` or other diagnostics: note the work and return `next(e)`, and save afterwards.
+- A hook may wait on what it needs to answer, never on recording or diagnostics: note the work, return `next(e)`, and save afterwards. The engine holds a skill's load, and an agent's first model request, until `skill.prompt`'s hooks answer.
+- A hook on a streaming event (`turn.step`, `process.spawn`) must be an async generator literal, ending `return yield* next(e)`.
+- The self-check shows that an event fired, not when, and kit tests raise events in the order a test writes them. So recheck any event order the mod relies on live after a Claude Code update (plan §9).
 - A skill's loop comes from what is open when `skill.prompt` fires. `skill.prompt` has no `agentId`, and the order differs by path (plan §9).
 - `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, with a typed command's arguments appended as `"ARGUMENTS: <args>"`, and no YAML block. Parse the body, and hash the body when you need a stable key.
 - The API has no YAML parser. Frontmatter arrives parsed in `e.frontmatter`, and override files are JSON (owner decision, plan F1.9).
 - `$.ui.log` goes to the visible transcript unless given `{ to: 'debug' }`. The mod's own diagnostics always say `debug`.
 - `$.store` is a plain JSON file (`~/.claude/plugins/store/<plugin>_<source>-<hash>.json`) that the same OS user can edit. Don't treat it as tamper-proof (plan F17).
 - A plugin's `tool.check` `ask` goes to a person; a `-p` run refuses it. The model can't run a plugin's registered command (the `Skill` tool refuses), and a typed command arrives as `origin: composer` in the Claude app and `origin: sdk` in a `-p` run.
-- An atom with a `shape` stores `{ shape, value }`. A plain `$.state.get` returns that wrapper, and `read($, atom)` unwraps it.
+- An atom with a `shape` stores `{ shape, value }`. A plain `$.state.get` returns that wrapper, and `read($, atom)` unwraps it and declines another shape. A plain `$.state.set` writes what it's given, so write the wrapper yourself; the contract's `Shaped<T>` makes the typecheck catch a bare value.
 
 ## Where the work stands
 
@@ -85,7 +87,6 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 
 - New learnings about the mod API go into plan §9, and each task's status into `docs/phase-1-tasks.md`.
 - The default branch is protected and nobody can bypass the ruleset, so every change lands through a PR.
-- The spike is being retired as `docs/phase-1-tasks.md` P1.0b says, in this order:
-  1. Done: land the first real mod, `taskmaster/`, in PR #6. With no mods at all the gate fails, which blocks every merge.
-  2. Done: delete `spike/`, in PR #7. The gate ignores the leftover exemption entry.
-  3. The owner's step: a PR that changes `coverage-exempt.json` to `{}`, with the owner lifting `gate-guard` for it. Claude can't edit that file.
+- The spike is being retired as `docs/phase-1-tasks.md` P1.0b says. The first real mod, `taskmaster/`, had to land first, in PR #6: with no mods at all the gate fails, which blocks every merge. Then, in this order:
+  1. Done: delete `spike/`, in PR #7. The gate ignores the leftover exemption entry.
+  2. The owner's step: a PR that changes `coverage-exempt.json` to `{}`, with the owner lifting `gate-guard` for it. Claude can't edit that file.

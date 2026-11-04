@@ -20,6 +20,8 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - `isReadOnly` read from the real call's `tool.check`,
   - a subagent's answer read from `turn.complete`.
 
+**`spike: <id>` citations** each name a Gate A check. The spike is deleted, so the check's definition is in `hooks/checks.ts` and `RUNBOOK.md` at [`d46b356`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike), and its result is in plan §10.1.
+
 **Owner decisions** (2026-11-03, on the proposals this list first made)
 1. **Resume without the Plan Gate (P1.15).** F8.6 has the Plan Gate make a resumed run reload the skill, rebuild its tasks and read `HANDOFF.md` before any write, and Phase 1 has no Plan Gate. So `/taskmaster resume` reloads the skill and rebuilds the tasks itself, and G3 holds the stop until `HANDOFF.md` has been read.
 2. **Legitimate waits (P1.10, P1.17).** Phase 1 recognises a wait from `taskmaster_await_user`, or from a trailing "?" on the last message (F5's fast pre-check). A stop that a trailing "?" lets through is listed in the summary below the answer, so a question can't hide a skipped step. The `$.model.classify` fallback arrives with Phase 2's question detection.
@@ -71,23 +73,37 @@ Report the commands with their output. `main` is protected, so each task (or a s
 
     So the bar is enforced only by the `mod-coverage` check, as before.
   - Checked in an interactive terminal (2026-11-03): loaded with `claude --debug --plugin-dir`, hot reloads and an exit worked, the debug logs show no failed hook, and the owner saw nothing from the mod.
-- [ ] P1.0b **Delete the spike** (owner decision 3). **Waiting on the owner: step 2.** Two PRs, in this order, and only after P1.0 is merged:
-  1. **Delete `spike/`. Done in PR #7.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`scripts/mod-coverage.mjs:331`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
+- [ ] P1.0b **Delete the spike** (owner decision 3). **Waiting on the owner: step 2.** Two PRs, in this order:
+  1. **Delete `spike/`. Done in PR #7.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`main()` in `scripts/mod-coverage.mjs`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
   2. **Remove the exemption entry.** A second PR deletes the `spike/taskmaster-spike` entry from `coverage-exempt.json`. That file is protected: Claude can't edit it (`.claude/settings.json`), and `gate-guard` fails the PR until the owner lifts that check in the ruleset for it. `main` takes no direct pushes, so this step is a PR too.
 
-  Don't reverse the order. Removing the entry while `spike/` exists fails `mod-coverage`, because the spike is at 61.58% (`scripts/mod-coverage.mjs:281`).
+  Step 2 waits for PR #7 to merge. Removing the entry while `spike/` exists fails `mod-coverage`, because the spike is at 61.58% (`printMod()` in `scripts/mod-coverage.mjs`).
 
 ## M1. Contract compiler (F1)
-- [x] P1.1 **Capture and attribute** (F1.1). **Done: PR #8.** On `skill.prompt`, capture the skill, its text, frontmatter, source, plugin name, path and a content hash. Attribute it to a loop: through the `Skill` tool's `tool.call.agentId`, through `agent.spawn` for preloaded skills, or to the main loop for a typed `/name` (spike: `skill-attribution`). **Red:** one test per attribution path. *Depends on P1.0.*
+- [x] P1.1 **Capture and attribute** (F1.1). **Done: PR #8.** On `skill.prompt`, capture the skill, frontmatter, source, plugin name, path and a content hash. Attribute it to a loop: through the `Skill` tool's `tool.call.agentId`, through `agent.spawn` for preloaded skills, or to the main loop for a typed `/name` (spike: `skill-attribution`). **Red:** one test per attribution path. *Depends on P1.0.*
   **Status (2026-11-04):**
-  - `hooks/skills.ts` captures each skill into `$.state` (`taskmaster.skills`, the newest 20), with a SHA-256 of its text and its loop. 20 new tests; coverage stays at 100% of lines and functions.
-  - **Attribution rules, from orders seen live on 2.1.317:**
+  - `hooks/skills.ts` captures each skill into `$.state` (`taskmaster.skills`, the newest 20), with a SHA-256 of its text and its loop, saved after the hook answers. Not the text itself. 29 tests beyond P1.0's 72; coverage stays at 100% of lines and functions.
+  - **Attribution, from orders seen live.** Each of these can claim a skill. One loop gets it, and two leave it `unattributed`:
     1. An open `Skill` call whose `skill` matches: `skill.prompt` fires inside the call.
     2. An open `prompt.submit` whose `command` matches: a typed `/name` expands inside `prompt.submit`'s `next(e)`, before the main `turn.start`.
-    3. The one agent whose spawn has answered and that hasn't yet made a tool call or ended its turn: a preloaded skill expands after `agent.spawn` resolves, not while it's open.
-    4. Otherwise `unattributed`. That includes two loops claiming the same skill, or two agents starting at once.
+    3. An agent whose spawn has answered and that hasn't reached its first model request: a preloaded skill expands just after `agent.spawn` resolves, and before that request. It has no name to match, so it claims any skill for those few milliseconds.
+
+    With no claim, or a forked skill (`context: fork`), it's `unattributed`.
   - **Checked live**, with a probe mod reading `taskmaster.skills`: typed `/notes` gave `main`/`typed`, the model's `Skill` call gave `main`/`skill-tool`, and a registered agent with `notes` preloaded gave that agent's id with `agent-preload`. A `Skill` call inside a subagent is checked only in the kit; the spike saw it live once.
-  - **Mutation checks:** each test fails when its safeguard is removed (closing a `Skill` call or typed command, ending the preload window at a tool call or turn end, starting it at a spawn, the ambiguity rule). The `catch` around the capture can't be seen in the kit: a hook that throws is skipped, and the skill passes on either way.
+  - **Mutation checks:** each test fails when its safeguard is removed, 23 mutants in the review round below.
+  - **Review round** (PR #8, `/code-review` of `0a4ae95` with Codex's one comment, 2026-11-04):
+    - **#1, #4 (Codex's P2):** `attribute()` returned on the first window that matched. It now weighs all three.
+    - **#2:** a skill can't be checked against an agent's preloads, because `agent.spawn`, `$.agent.list` and `agent.offer` don't carry the list. It's a stated limit, and a test pins it.
+    - **#3:** the window ends at the agent's first `turn.step`, its `classic.SubagentStop` and each `prompt.submit`, as well as its first tool call and turn end. A teammate, a workflow agent and a resumed run open none.
+    - **#5:** the save runs in a queue after the hook answers, because the engine holds a skill's load until `skill.prompt`'s hooks answer.
+    - **#6: didn't reproduce.** On 2.1.318, six overlapping `update` calls all landed. The save uses a plain `$.state.set` anyway (plan §9).
+    - **#7:** a failed capture writes one debug line, and shows nothing.
+    - **#8:** the capture keeps no text. Stripping the `ARGUMENTS` block wouldn't be enough, because `$ARGUMENTS` puts the words in the body.
+    - **#9:** the `hash` comment no longer calls it a cache key.
+    - **#10:** see "Before merging".
+    - **Found while fixing:** a forked skill got the caller's loop, confirmed live, so it stays unattributed. And `failStateWrites` never failed a write, so `failClock` replaces it.
+    - **Limits:** an agent killed before any closing event stays a claim until the next prompt; a live attempt to test a kill didn't get that far. A rejecting `$.state.set` can't be tested in the kit, which answers beneath it. The self-check shows that `turn.step` fired, not when, so event order needs a live recheck after a Claude Code update (plan §9).
+  - **Before merging:** the owner runs the interactive-terminal check on this PR (owner's decision, 2026-11-04), and it's recorded here as for P1.0. P1.2 and P1.3 are treated the same.
 - [x] P1.2 **Deterministic parse** (F1.2). **Done: PR #9.** Name, description, and the `allowed-tools`, `context: fork` and `disable-model-invocation` frontmatter keys. Numbered or ordered lists, "Step N" headings, `- [ ]` checklists, MUST/NEVER/ALWAYS lines, and test, lint or build commands in code fences (candidate verify commands). **Red:** fixtures for a numbered workflow, a checklist skill, and a reference skill that yields no steps. *Depends on P1.1.*
   **Status (2026-11-04):**
   - `hooks/parse.ts`'s `parseSkill(text, frontmatter)` is pure. It isn't wired to a hook yet: P1.4 builds the contract from it.
@@ -106,17 +122,19 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - **Not yet verified live:** the `ARGUMENTS` separator was seen once, after a body ending in a newline. Whether a body without a trailing newline still gets two blank lines before `ARGUMENTS` is unchecked. This frame-stripping and P1.4's cache key both rely on it.
     - Some reference skills' numbered lists of principles read as steps. That's expected: P1.4's model classification (`workflow`, `reference`, `persona`) and the agreement rule decide those.
     - None of those skills has a test, lint or build command in a shell block, so verify candidates are checked in the tests only.
+  - **Before merging:** the owner runs the interactive-terminal check on this PR (owner's decision, 2026-11-04), and it's recorded here as for P1.0.
 - [x] P1.3 **Frontmatter and overrides** (F1.7, F1.9). **Done: PR #10.** Parse and schema-validate the `taskmaster:` block, and read the skill's override file, `.taskmaster/overrides/<skill>.json` (owner decision 5). Precedence is frontmatter, then override, then LLM, then heuristics (principle 1). **Red:** invalid frontmatter falls back with a logged reason, and an override beats extraction. *Depends on P1.2.*
   **Status (2026-11-04):**
   - `hooks/contract.ts` validates a declared contract strictly and all-or-nothing, so an invalid one is never half-used. It checks known keys, version 1, the three modes, step ids (well-formed and unique), titles, `mandatory`, `when`, exactly one verify kind with a whole-number `exit`, `confirm_before` naming real steps, and provenance.
   - **The frontmatter tier is skipped when the engine sets `frontmatterProblem`.** Its own docs leave refusing such a skill to the hook, and a dropped frontmatter would otherwise lose a `taskmaster:` block silently.
-  - **`skill.prompt` reads the override file** (`<root>/<overrideDir>/<overrideFile(skill)>`) only when the frontmatter gives no contract. It stores the result as the capture's `declared`, and logs each set-aside contract to the **debug** log only. The capture shape is now `skills-2`.
+  - **`skill.prompt` reads the override file** (`<root>/<overrideDir>/<overrideFile(skill)>`) only when the frontmatter gives no contract. It stores the result as the capture's `declared`, and logs each set-aside contract to the **debug** log only. The capture shape is now `skills-3`.
   - **`pickTier`** holds principle 1's full order, unwired, with the model tier's slot for P1.4. P1.4 also names `contract_source`.
   - **Tests:** 44 new, and coverage stays at 100% of lines and functions. Seven mutants each fail their own test: the precedence order (twice), all-or-nothing, reading only when needed, the debug destination, `frontmatterProblem`, and file-name safety.
   - **Checked live:** a real `notes.json` override gave `source: override` with its contract. A skill with `mode: loud` gave `none`, with its reason and a debug-log line, and showed nothing.
   - **For the owner:** principle 1 puts frontmatter before an override. But F1.8 and F16.6 say overrides exist to fix skills you can't edit, so an installed skill that ships a wrong `taskmaster:` block can't be overridden. Should an override beat a third-party (non-project) skill's frontmatter?
+  - **Before merging:** the owner runs the interactive-terminal check on this PR (owner's decision, 2026-11-04), and it's recorded here as for P1.0.
 - [ ] P1.4 **Cached extraction and enforcement level** (F1.3, F1.4). One Haiku call returns JSON that is validated against a schema and cached in `$.store` by path + hash. If the call fails, the F1.2 result is used. The level is `enforce`, `advisory` or `none`: `none` for reference and persona skills and for `exemptSkills`. **Red:**
-  - **The cache key** (found in P1.1, checked live on 2.1.317). `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, and a typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. So P1.1's capture `hash` changes with the skill's folder and with every argument. Key the cache on a hash of the body alone (header and `ARGUMENTS` block removed), with the path, or on the file's own content.
+  - **The cache key** (found in P1.1, checked live on 2.1.317). `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, and a typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. So P1.1's capture `hash` changes with the skill's folder and with every argument. Key the cache on a hash of the body alone (header and `ARGUMENTS` block removed), with the path, or on the file's own content. A skill whose body has `$ARGUMENTS` takes the words into the body, where they can't be stripped (seen live on 2.1.318), so only the file's content is stable for those. The capture keeps no text, so take it from `e.text` in the hook.
   - a second load of the same hash makes no model call,
   - a failed call yields the F1.2 result as `advisory`,
   - high confidence that disagrees with the parse stays `advisory`.

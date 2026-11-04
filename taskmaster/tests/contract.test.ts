@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { fromFrontmatter, fromOverride, overrideFile, pickTier, resolveDeclared, validateDeclared } from '../hooks/contract'
 import type { DeclaredContract, SkillCapture } from '../types'
-import { engine, start, stateValue } from './engine'
+import { engine, start, stateValue, until } from './engine'
 import type { EngineOptions, World } from './engine'
 
 // P1.3: the declared contract tiers (plan F1.7, F1.9). Override files are
@@ -180,9 +180,11 @@ test('an override file is named after the skill, with anything but letters, digi
 
 const OVERRIDE_PATH = '/repo/.taskmaster/overrides/notes.json'
 
-function captured(world: World): SkillCapture | undefined {
-  const list = stateValue(world, 'taskmaster/skills') as SkillCapture[] | undefined
-  return list?.[list.length - 1]
+/** The capture of the one skill a test loads, once it has landed: saves run after the hook answers. */
+async function captured(world: World): Promise<SkillCapture | undefined> {
+  const list = () => stateValue(world, 'taskmaster/skills') as SkillCapture[] | undefined
+  await until(world, () => (list()?.length ?? 0) > 0)
+  return list()?.at(-1)
 }
 
 async function load($: Engine, frontmatter: Frontmatter, frontmatterProblem?: string) {
@@ -205,7 +207,7 @@ test('a skill with a valid taskmaster: block uses it, and reads no override file
   const world = await session($, on, { files: { [OVERRIDE_PATH]: JSON.stringify({ steps: [] }) } })
   await load($, { taskmaster: BLOCK })
 
-  expect(captured(world)?.declared).toEqual({ source: 'frontmatter', contract: CONTRACT, problems: [] })
+  expect((await captured(world))?.declared).toEqual({ source: 'frontmatter', contract: CONTRACT, problems: [] })
   expect(world.reads).toEqual([])
 })
 
@@ -214,7 +216,7 @@ test('a skill with no block reads its override file from the project\'s override
   await load($, {})
 
   expect(world.reads).toEqual([OVERRIDE_PATH])
-  expect(captured(world)?.declared).toEqual({ source: 'override', contract: CONTRACT, problems: [] })
+  expect((await captured(world))?.declared).toEqual({ source: 'override', contract: CONTRACT, problems: [] })
 })
 
 test('the override folder comes from the settings', { options: { overrideDir: 'state/overrides' } }, async ($, on) => {
@@ -228,7 +230,7 @@ test('a missing override file means no declared contract, and logs nothing', asy
   const world = await session($, on)
   await load($, {})
 
-  expect(captured(world)?.declared).toEqual({ source: 'none', problems: [] })
+  expect((await captured(world))?.declared).toEqual({ source: 'none', problems: [] })
   expect(world.logs).toEqual([])
 })
 
@@ -236,7 +238,7 @@ test('a contract set aside is logged to the debug log, never the transcript', as
   const world = await session($, on, { files: { [OVERRIDE_PATH]: '{ not json' } })
   await load($, { taskmaster: { mode: 'loud', steps: [] } })
 
-  const declared = captured(world)?.declared
+  const declared = (await captured(world))?.declared
   expect(declared?.source).toBe('none')
   expect(declared?.problems.map(problem => problem.where)).toEqual(['frontmatter', 'override'])
   expect(world.logs).toHaveLength(2)
@@ -248,7 +250,7 @@ test('a skill whose frontmatter the engine flagged falls through to its override
   const world = await session($, on, { files: { [OVERRIDE_PATH]: JSON.stringify(BLOCK) } })
   await load($, { taskmaster: { mode: 'advisory', steps: [] } }, 'a key was left out')
 
-  const declared = captured(world)?.declared
+  const declared = (await captured(world))?.declared
   expect(declared?.source).toBe('override')
   expect(declared?.problems[0]?.message).toMatch(/a key was left out/)
 })

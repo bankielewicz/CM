@@ -22,6 +22,7 @@ export const WATCHED = [
   'classic.PreCompact',
   'classic.SessionStart',
   'classic.Stop',
+  'classic.SubagentStop',
   'classic.TaskCompleted',
   'prompt.submit',
   'session.compact',
@@ -32,6 +33,7 @@ export const WATCHED = [
   'tool.check',
   'turn.complete',
   'turn.start',
+  'turn.step',
 ] as const satisfies readonly WatchedEvent[]
 
 // Fails the typecheck if WatchedEvent names an event WATCHED leaves out.

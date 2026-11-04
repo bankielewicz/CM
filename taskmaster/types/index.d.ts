@@ -36,6 +36,7 @@ export type WatchedEvent =
   | 'classic.PreCompact'
   | 'classic.SessionStart'
   | 'classic.Stop'
+  | 'classic.SubagentStop'
   | 'classic.TaskCompleted'
   | 'prompt.submit'
   | 'session.compact'
@@ -46,6 +47,7 @@ export type WatchedEvent =
   | 'tool.check'
   | 'turn.complete'
   | 'turn.start'
+  | 'turn.step'
 
 /**
  * What the self-check keeps in `$.store`, one record per Claude Code build:
@@ -118,20 +120,27 @@ export type DeclaredResolution = {
   problems: ContractProblem[]
 }
 
-/** A skill as it loaded (plan F1.1): what `skill.prompt` gave, a content hash, and its loop. */
+/**
+ * A skill as it loaded (plan F1.1): what `skill.prompt` gave, a content hash, and
+ * its loop. Not its text, which can hold the words of a typed command: a hook has
+ * that as `e.text`, and later the file at `path` has the skill itself.
+ */
 export type SkillCapture = {
   skill: string
-  text: string
   frontmatter: Readonly<Record<string, unknown>>
   frontmatterProblem?: string
   source: string
   pluginName?: string
   path?: string
-  /** SHA-256 of `text`, as hex. With `path`, the key P1.4 caches an extraction under. */
+  /**
+   * SHA-256 of the text as `skill.prompt` gave it, as hex. It changes with the
+   * skill's folder and with every argument, so it isn't a cache key: P1.4 and
+   * P1.15 hash the body.
+   */
   hash: string
   loop: SkillLoop
   via: SkillVia
-  /** When it loaded, from `$.clock.now()`. */
+  /** When it was recorded, just after it loaded, from `$.clock.now()`. */
   at: number
   /** Its declared contract, from the frontmatter or an override file (P1.3). */
   declared: DeclaredResolution
