@@ -222,10 +222,10 @@ type Heredoc = { word: string; stripTabs: boolean }
 
 /**
  * Reads the heredoc opened by the `<<` at `at`: the whole delimiter word, with its
- * quotes and backslashes removed, and where it ends. No word, or an unclosed
- * quote, opens nothing.
+ * quotes and backslashes removed. No word, or an unclosed quote, opens nothing.
+ * That covers a here-string too, since `<` can't start a word.
  */
-function readHeredoc(text: string, at: number): { heredoc: Heredoc; end: number } | undefined {
+function readHeredoc(text: string, at: number): Heredoc | undefined {
   const stripTabs = text[at + 2] === '-'
   let cursor = at + (stripTabs ? 3 : 2)
   while (text[cursor] === ' ' || text[cursor] === '\t') cursor += 1
@@ -243,7 +243,7 @@ function readHeredoc(text: string, at: number): { heredoc: Heredoc; end: number 
       cursor = close
     } else word += char
   }
-  return word ? { heredoc: { word, stripTabs }, end: cursor } : undefined
+  return word ? { word, stripTabs } : undefined
 }
 
 /** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
@@ -276,12 +276,10 @@ function readShell(text: string): { segments: string[]; heredocs: Heredoc[] } {
       segments.push(text.slice(start, at))
       start = at + (char === ';' ? 1 : 2)
       at = start - 1
-    } else if (text.startsWith('<<<', at)) at += 2
-    else if (text.startsWith('<<', at)) {
-      const found = readHeredoc(text, at)
-      if (found) heredocs.push(found.heredoc)
-      // The word's quotes are spent, so it's stepped over. With no word, only the << is.
-      at = found ? found.end - 1 : at + 1
+    } else if (text.startsWith('<<', at)) {
+      const heredoc = readHeredoc(text, at)
+      if (heredoc) heredocs.push(heredoc)
+      at += 1
     }
   }
   segments.push(text.slice(start, end))

@@ -554,6 +554,11 @@ test('a line that only looks like a fence, inside a code block, leaves an open h
   expect(commandsIn('~~~bash\ncat <<EOF\n```\nnpm test\nEOF\nmake lint\n~~~\n')).toEqual(['make lint'])
 })
 
+test('a fence line is never read as a command, opening or closing', () => {
+  expect(commandsIn('``` ; npm test\nls\n```\n')).toEqual([])
+  expect(commandsIn(shell('cargo test \\'))).toEqual([])
+})
+
 test('a heredoc delimiter is the whole word, with its quotes removed', () => {
   const spellings: [string, string][] = [
     ["<<'EOF-JSON'", 'EOF-JSON'],
@@ -608,6 +613,7 @@ test("a terminator is matched after the code block's own indent comes off, and n
   expect(commandsIn(block('   cat <<-EOF', '   npm test', '   \tEOF', '   make lint'))).toEqual(['make lint'])
   expect(commandsIn(block('   cat <<EOF', '     EOF', '   npm test', '   EOF', '   make lint'))).toEqual(['make lint'])
   expect(commandsIn(block('   cat <<EOF', '   npm test', 'EOF', '   make lint'))).toEqual(['make lint'])
+  expect(commandsIn(block('   cat <<EOF', '   npm test', '  EOF', '   make lint'))).toEqual(['make lint'])
 })
 
 test('with nothing to read as a delimiter, or an unclosed quote, no heredoc opens', () => {
@@ -617,7 +623,7 @@ test('with nothing to read as a delimiter, or an unclosed quote, no heredoc open
 })
 
 test('<< inside arithmetic opens no heredoc, with or without the $', () => {
-  for (const line of ['((x = 1 << 2))', 'echo $(( (1+2) << 3 ))', 'echo $((a<<b))', 'grep x <<<EOF']) {
+  for (const line of ['((x = 1 << 2))', 'echo $(( (1+2) << 3 ))', 'echo $(( (1)+(2) << 3 ))', 'echo $((a<<b))', 'grep x <<<EOF']) {
     expect(commandsIn(shell(line, 'npm test'))).toEqual(['npm test'])
   }
 })
@@ -690,6 +696,11 @@ test('code spans stay literal in a title, while emphasis around them goes', () =
 6. a \` stray *b*
 `
   expect(titles(body)).toEqual(['Edit __init__.py', 'Run __tests__', 'Use *a* here', 'Run npm test', 'a`b and _c_', 'a ` stray b'])
+})
+
+test('a code span closes only on a run of its own length, whole', () => {
+  expect(titles('1. ```a`` x\n')).toEqual(['```a`` x'])
+  expect(titles('1. `a``b`\n')).toEqual(['a``b'])
 })
 
 test('the title cap counts the code span, not what stood in for it', () => {
