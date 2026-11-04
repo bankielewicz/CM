@@ -300,3 +300,17 @@ test('a Skill call no longer claims the skill once it has answered', async ($, o
 
   expect((await only($, world)).via).toBe('unattributed')
 })
+
+// ---------------------------------------------------------------- saving
+
+// Run first on the code that awaited update() in the hook: a look at what the
+// kit does, not a red. The kit answers beneath $.state, so what the real engine
+// does comes from a live probe (plan §9).
+test('two skills that load at once are both recorded', async ($, on) => {
+  const world = engine(on)
+  await start($)
+  await Promise.all([expand($, 'one'), expand($, 'two')])
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill).sort()).toEqual(['one', 'two'])
+})
