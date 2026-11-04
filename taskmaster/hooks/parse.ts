@@ -27,7 +27,12 @@ const VERIFY: readonly RegExp[] = [
   /^mvn\s+(test|verify|package)\b/,
 ]
 
-type Line = { text: string; number: number; code?: { lang: string } }
+/** An indented code block's language: it has none, and isn't read for commands, which come from fences. */
+const INDENTED = 'indented'
+const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/
+
+/** `inList`: a list was open when this line began. */
+type Line = { text: string; number: number; code?: { lang: string }; inList?: boolean }
 
 /** A step and the lines that belong to it, for placing commands under steps. */
 type Span = { step: ParsedStep; end: number }
@@ -45,37 +50,46 @@ export function parseSkill(text: string, frontmatter: Readonly<Record<string, un
 
 // ---------------------------------------------------------------- the frame
 
-/** The body's lines with their 1-based numbers in the full text: header, YAML block and ARGUMENTS left out. */
+/** The body's lines with their 1-based numbers in the full text: header and ARGUMENTS left out. */
 function body(text: string): { text: string; number: number }[] {
-  const all = text.split('\n').map((line, index) => ({ text: line, number: index + 1 }))
+  const all = text.split('\n').map((line, index) => ({ text: line.replace(/\r$/, ''), number: index + 1 }))
   let start = 0
   if (all[0]?.text.startsWith(HEADER)) start = 1
   while (all[start]?.text.trim() === '') start += 1
-  if (all[start]?.text.trim() === '---') {
-    const close = all.findIndex((line, index) => index > start && line.text.trim() === '---')
-    if (close !== -1) start = close + 1
-  }
-  let end = all.length
-  for (let index = all.length - 1; index >= 2; index -= 1) {
-    if (all[index]?.text.startsWith(ARGUMENTS) && all[index - 1]?.text === '' && all[index - 2]?.text === '') {
-      end = index
-      break
-    }
-  }
-  return all.slice(start, end)
+  // The first ARGUMENTS block, not the last: typed text can repeat the pattern,
+  // and must never become skill rules. The cost is that a body holding this exact
+  // pattern loses its tail, which drops requirements rather than inventing them.
+  const end = all.findIndex(
+    (line, index) => line.text.startsWith(ARGUMENTS) && all[index - 1]?.text === '' && all[index - 2]?.text === '',
+  )
+  return all.slice(start, end === -1 ? all.length : end)
 }
 
-/** Marks each line inside a fenced code block, whatever the fence's indent, with the block's language. */
+/**
+ * Marks each line inside a code block: fenced, whatever the fence's indent, with
+ * the block's language, or indented four spaces after a blank line. Inside a list
+ * those indented lines are the item's own paragraphs, so they stay text and their
+ * rules count. A list ends at the first other line at column 0, as in listSteps.
+ */
 function classify(lines: { text: string; number: number }[]): Line[] {
   let fence: { marker: string; lang: string } | undefined
+  let inList = false
+  let codeMayStart = true
   return lines.map(line => {
     const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)/.exec(line.text)
     if (!fence) {
       if (open?.[1]) {
         fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase() }
+        codeMayStart = false
         return { ...line, code: { lang: '' } }
       }
-      return line
+      const blank = line.text.trim() === ''
+      if (!blank && !inList && codeMayStart && /^(?: {4}|\t)/.test(line.text)) return { ...line, code: { lang: INDENTED } }
+      codeMayStart = blank
+      const marked = inList ? { ...line, inList } : line
+      if (LIST_ITEM.test(line.text)) inList = true
+      else if (!blank && !/^\s/.test(line.text)) inList = false
+      return marked
     }
     const current = fence
     const trimmed = line.text.trim()
@@ -91,7 +105,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
 
 const ORDERED = /^(\s*)\d+[.)]\s+(.*)$/
 const CHECKLIST = /^(\s*)[-*+]\s+\[[ xX]\]\s+(.*)$/
-const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/
+const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/
 
 function title(raw: string): string {
   const plain = raw
@@ -129,23 +143,31 @@ function headingSteps(lines: Line[]): Span[] | undefined {
 }
 
 /**
- * The first top-level list of this kind. It runs across blank lines, indented
- * lines and code blocks, and ends at the first other line at column 0.
+ * The first top-level list of this kind, whose first item's indent, up to 3
+ * spaces, is the top level. An indented item inside another list is nested in it.
+ * The list runs across blank lines, deeper lines and code blocks, and ends at the
+ * first other line at its top level or further out.
  */
 function listSteps(lines: Line[], item: RegExp, kind: ParsedStep['kind']): Span[] | undefined {
-  const isItem = (line: Line): RegExpExecArray | null => {
+  const itemIn = (line: Line): { indent: number; text: string } | undefined => {
     const match = line.code ? null : item.exec(line.text)
-    return match && (match[1] ?? '').length < 2 ? match : null
+    return match ? { indent: (match[1] ?? '').length, text: match[2] ?? '' } : undefined
   }
-  const first = lines.findIndex(line => isItem(line) !== null)
+  const startsList = (found: { indent: number }, line: Line): boolean => found.indent < 2 || (found.indent <= 3 && !line.inList)
+  const first = lines.findIndex(line => {
+    const found = itemIn(line)
+    return found !== undefined && startsList(found, line)
+  })
   if (first === -1) return undefined
+  const top = (itemIn(lines[first] as Line) as { indent: number }).indent
   const items: { title: string; index: number }[] = []
   let last = lines.length
   for (let index = first; index < lines.length; index += 1) {
     const line = lines[index] as Line
-    const match = isItem(line)
-    if (match) items.push({ title: title(match[2] ?? ''), index })
-    else if (!line.code && line.text.trim() !== '' && !/^\s/.test(line.text)) {
+    const found = itemIn(line)
+    if (found && found.indent < top + 2) items.push({ title: title(found.text), index })
+    else if (kind === 'checklist' && /^\s*[-*+]\s/.test(line.text)) continue // a plain bullet among the boxes
+    else if (!line.code && line.text.trim() !== '' && line.text.search(/\S/) <= top) {
       last = index
       break
     }
@@ -169,12 +191,58 @@ function rules(lines: Line[]): ParsedRule[] {
   return found
 }
 
+const HEREDOC = /^<<-?\s*(?:\\|['"])?([A-Za-z_]\w*)/
+/** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
+const ENV_PREFIX = /^(?:[A-Za-z_]\w*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])*\s+)+/
+
+/**
+ * One shell line's `&&`, `||` and `;` segments, and the terminators of any
+ * heredocs it opens. It reads quotes and comments, and little else: this is not
+ * a shell parser.
+ */
+function readShell(text: string): { segments: string[]; heredocs: string[] } {
+  const segments: string[] = []
+  const heredocs: string[] = []
+  let quote = ''
+  let start = 0
+  let end = text.length
+  for (let at = 0; at < end; at += 1) {
+    const char = text[at]
+    if (char === '\\' && quote !== "'") at += 1
+    else if (quote) quote = char === quote ? '' : quote
+    else if (char === '"' || char === "'") quote = char
+    else if (char === '#' && (at === 0 || /\s/.test(text[at - 1] as string))) end = at
+    else if (char === ';' || text.startsWith('&&', at) || text.startsWith('||', at)) {
+      segments.push(text.slice(start, at))
+      start = at + (char === ';' ? 1 : 2)
+      at = start - 1
+    } else if (char === '<' && text[at - 1] !== '<') {
+      const terminator = HEREDOC.exec(text.slice(at))?.[1]
+      if (terminator) heredocs.push(terminator)
+    }
+  }
+  segments.push(text.slice(start, end))
+  return { segments, heredocs }
+}
+
 function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   const found: VerifyCandidate[] = []
   const seen = new Set<string>()
   let pending: { text: string; line: number } | undefined
+  let heredocs: string[] = []
   for (const line of lines) {
-    if (!line.code || !SHELLS.has(line.code.lang) || /^\s*(`{3,}|~{3,})/.test(line.text)) continue
+    const fence = /^\s*(`{3,}|~{3,})/.test(line.text)
+    if (fence) {
+      // A code block's end ends whatever was still open in it.
+      pending = undefined
+      heredocs = []
+    }
+    if (!line.code || !SHELLS.has(line.code.lang) || fence) continue
+    if (heredocs.length > 0) {
+      // Trimmed, not exact: a block inside a list item indents its terminator too.
+      if (line.text.trim() === heredocs[0]) heredocs.shift()
+      continue
+    }
     const text = line.text.trim().replace(/^\$\s+/, '')
     const joined = pending ? `${pending.text} ${text}` : text
     const at = pending?.line ?? line.number
@@ -183,10 +251,13 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
       continue
     }
     pending = undefined
-    for (const segment of joined.split(/&&|\|\||;/)) {
-      const command = segment.trim().replace(/^([A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '')
+    const shell = readShell(joined)
+    heredocs = shell.heredocs
+    for (const segment of shell.segments) {
+      const command = segment.trim().replace(ENV_PREFIX, '')
       if (!VERIFY.some(pattern => pattern.test(command))) continue
-      const span = spans.find(candidate => candidate.step.line <= at && at < candidate.end)
+      // Spans are in text order, so the last that contains the line is the innermost.
+      const span = spans.filter(candidate => candidate.step.line <= at && at < candidate.end).pop()
       // Once per step: a later step that runs the same command keeps its own verify spec.
       const key = `${span?.step.id ?? ''}\n${command}`
       if (seen.has(key)) continue
@@ -212,9 +283,26 @@ function meta(frontmatter: Readonly<Record<string, unknown>>): Pick<ParsedSkill,
   }
 }
 
-/** A comma or space-separated string, or a list. Spaces inside parentheses, as in `Bash(git commit:*)`, don't split. */
+/** A comma or space-separated string, or a list. */
 function tools(value: unknown): string[] {
-  const raw = typeof value === 'string' ? value.split(/,|\s+(?![^()]*\))/) : Array.isArray(value) ? value : []
+  const raw = typeof value === 'string' ? splitTools(value) : Array.isArray(value) ? value : []
   const names = raw.filter((name): name is string => typeof name === 'string').map(name => name.trim()).filter(Boolean)
   return [...new Set(names)]
+}
+
+/** Splits only outside parentheses, so `Bash(sed -n 1,20p:*)` stays whole. */
+function splitTools(value: string): string[] {
+  const names: string[] = []
+  let current = ''
+  let depth = 0
+  for (const char of value) {
+    if (char === '(') depth += 1
+    if (char === ')') depth = Math.max(0, depth - 1)
+    if (depth === 0 && /[,\s]/.test(char)) {
+      names.push(current)
+      current = ''
+    } else current += char
+  }
+  names.push(current)
+  return names
 }

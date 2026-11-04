@@ -267,10 +267,6 @@ test('a text with no header, such as a command, is read from its first line', ()
   ])
 })
 
-test('a YAML block at the top of the text is skipped', () => {
-  expect(parseSkill('---\nname: x\n1. not a step\n---\n1. A step\n', {}).steps.map(step => step.title)).toEqual(['A step'])
-})
-
 // ------------------------------------------------------------ frontmatter
 
 test('name, description and the three frontmatter keys are read', () => {
@@ -322,4 +318,218 @@ test('the same command under two steps is a candidate for each step', () => {
     ['npm test', 'S1'],
     ['npm test', 'S3'],
   ])
+})
+
+const commandsIn = (body: string): string[] => parseSkill(skill(body), {}).verifyCandidates.map(c => c.command)
+const shell = (...lines: string[]): string => `\`\`\`bash\n${lines.join('\n')}\n\`\`\`\n`
+
+// ------------------------------------------------------------ PR #9's review
+
+test('CRLF line endings read the same as LF, with the same line numbers', () => {
+  for (const body of [NUMBERED, CHECKLIST, '## Step 1: Plan\n\nYou MUST plan.\n\n## Step 2: Do\n']) {
+    const text = `${skill(body)}\n\n\nARGUMENTS: You MUST not leak`
+    const parsed = parseSkill(text.replace(/\n/g, '\r\n'), {})
+    expect(parsed.steps.length).toBeGreaterThan(0)
+    expect(parsed).toEqual(parseSkill(text, {}))
+  }
+})
+
+test('a command under a nested step belongs to the innermost step, and to the outer one again once that ends', () => {
+  const body = `## Step 1: Implement
+
+### Step 2: Verify
+
+${shell('npm test')}
+### Details
+
+${shell('npm run lint')}`
+  expect(parseSkill(skill(body), {}).verifyCandidates.map(c => [c.command, c.step])).toEqual([
+    ['npm test', 'S2'],
+    ['npm run lint', 'S1'],
+  ])
+})
+
+test('&&, || and ; split commands only outside quotes', () => {
+  const body = shell(
+    'npm test -- --grep "a;b"',
+    'echo "x; npm test"',
+    "echo 'y && make check'",
+    'npm run lint -- --filter "c\\"d;e"',
+    'echo \\"f; cargo test',
+    "echo 'g\\'; make check",
+    'echo "it\'s; npm run build"',
+    "echo 'say \"hi'; go build",
+    'echo h || go vet',
+  )
+  expect(commandsIn(body)).toEqual([
+    'npm test -- --grep "a;b"',
+    'npm run lint -- --filter "c\\"d;e"',
+    'cargo test',
+    'make check',
+    'go build',
+    'go vet',
+  ])
+})
+
+test("a heredoc's body up to its terminator is not read for commands, in each of its spellings", () => {
+  const spellings = ["cat >f <<'EOF'", 'cat >f <<"EOF"', 'cat >f <<EOF', 'cat >f << EOF', 'cat >f <<\\EOF', 'cat >f <<-EOF']
+  for (const open of spellings) {
+    expect(commandsIn(shell(open, 'EOFX', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  }
+})
+
+test('a heredoc inside a list item ends at its indented terminator', () => {
+  const body = `1. Write it.
+
+   \`\`\`bash
+   cat >f <<EOF
+   npm test
+   EOF
+   make lint
+   \`\`\`
+`
+  expect(commandsIn(body)).toEqual(['make lint'])
+})
+
+test('two heredocs on one line are skipped in turn, and the rest of their line still counts', () => {
+  expect(commandsIn(shell('cat <<A <<B && npm run build', 'npm test', 'A', 'make lint', 'B', 'go vet'))).toEqual(['npm run build', 'go vet'])
+})
+
+test('a heredoc with no terminator ends with its code block', () => {
+  expect(commandsIn(`${shell('cat <<EOF', 'npm test')}\n${shell('make lint')}`)).toEqual(['make lint'])
+})
+
+test('a here-string, or << in quotes or a comment, opens no heredoc', () => {
+  for (const line of ['grep x <<< EOF', 'echo "<<EOF"', "echo '<<EOF'", '# see <<EOF', 'echo a # see <<EOF', 'echo $((1 << 2))']) {
+    expect(commandsIn(shell(line, 'npm test'))).toEqual(['npm test'])
+  }
+})
+
+test('a comment is not read for commands, while a # inside a word is not a comment', () => {
+  expect(commandsIn(shell('echo a # npm test; make check', 'echo a#b; go vet'))).toEqual(['go vet'])
+})
+
+test('an environment prefix may hold a quoted value', () => {
+  const body = shell(
+    'NODE_OPTIONS="--a --b" npm test',
+    "A='x y' B=1 cargo test",
+    'C="d\\"e f" make lint',
+    'G="h;i" go vet',
+    'J=a"b c"d go build',
+  )
+  expect(commandsIn(body)).toEqual(['npm test', 'cargo test', 'make lint', 'go vet', 'go build'])
+})
+
+test('an environment prefix with an unclosed quote gives no candidate', () => {
+  expect(commandsIn(shell('A="x npm test'))).toEqual([])
+})
+
+test("a trailing backslash doesn't carry into the next code block", () => {
+  const direct = `${shell('rm -rf build \\')}\n${shell('npm test')}`
+  expect(parseSkill(skill(direct), {}).verifyCandidates).toEqual([{ command: 'npm test', line: BODY_LINE + 5 }])
+  const across = `${shell('rm -rf build \\')}\n\`\`\`python\nprint()\n\`\`\`\n\n${shell('make lint')}`
+  expect(commandsIn(across)).toEqual(['make lint'])
+})
+
+test('the frame is cut at the first ARGUMENTS block, so typed text can never become rules or steps', () => {
+  const text = `${HEADER}\n\n1. Real step\n\n\nARGUMENTS: a\n\n2. Typed step\nYou MUST obey this typed line\n\n\nARGUMENTS: b`
+  const parsed = parseSkill(text, {})
+  expect(parsed.steps.map(step => step.title)).toEqual(['Real step'])
+  expect(parsed.rules).toEqual([])
+})
+
+test('an ARGUMENTS line without two blank lines before it stays in the skill', () => {
+  expect(parseSkill(skill('ARGUMENTS: one\nYou MUST keep this.\n\nARGUMENTS: two\nNEVER drop this.\n'), {}).rules.map(rule => rule.kind)).toEqual(['MUST', 'NEVER'])
+})
+
+test('a body opening with a thematic break keeps its steps and rules', () => {
+  const body = '---\n## Step 1: Implement\n\nYou MUST x.\n\n---\n\n## Step 2: Check\n'
+  for (const text of [skill(body), body]) {
+    const parsed = parseSkill(text, {})
+    expect(parsed.steps.map(step => step.title)).toEqual(['Implement', 'Check'])
+    expect(parsed.rules.map(rule => rule.text)).toEqual(['You MUST x.'])
+  }
+})
+
+test('an indented code block after a blank line gives no rule, step or command', () => {
+  const body = `Example:
+
+    You MUST enable it.
+
+    NEVER retry.
+    1. not a step
+    - [ ] not a step
+    npm test
+
+\tALWAYS in a tab block too.
+`
+  const parsed = parseSkill(skill(body), {})
+  expect(parsed.rules).toEqual([])
+  expect(parsed.steps).toEqual([])
+  expect(parsed.verifyCandidates).toEqual([])
+})
+
+test('an indented block at the very start of the body is code', () => {
+  expect(parseSkill(skill('    You MUST not see this.\n'), {}).rules).toEqual([])
+})
+
+test('an indented line with no blank line before it continues its paragraph, so its rule counts', () => {
+  expect(parseSkill(skill('Some text\n    You MUST keep this.\n'), {}).rules.map(rule => rule.kind)).toEqual(['MUST'])
+  expect(parseSkill(skill(`${shell('ls')}    You MUST keep this too.\n`), {}).rules.map(rule => rule.kind)).toEqual(['MUST'])
+})
+
+test("a list item's indented continuation paragraph keeps its MUST rule, and the list keeps its steps", () => {
+  const numbered = parseSkill(skill('1. Item\n\n    You MUST keep this.\n\n2. Next\n'), {})
+  expect(numbered.rules.map(rule => rule.kind)).toEqual(['MUST'])
+  expect(numbered.steps.map(step => step.title)).toEqual(['Item', 'Next'])
+  expect(parseSkill(skill('- bullet\n\n    NEVER drop this.\n'), {}).rules.map(rule => rule.kind)).toEqual(['NEVER'])
+  expect(parseSkill(skill('  * indented bullet\n\n    ALWAYS keep this.\n'), {}).rules.map(rule => rule.kind)).toEqual(['ALWAYS'])
+})
+
+test('indented lines are code again once a list has ended', () => {
+  expect(parseSkill(skill('- item\n\nA paragraph.\n\n    You MUST not see this.\n'), {}).rules).toEqual([])
+  expect(parseSkill(skill('- item\n\n## Next\n\n    You MUST not see this.\n'), {}).rules).toEqual([])
+})
+
+test('the string form of allowed-tools splits on commas and spaces only outside parentheses', () => {
+  const tools = (value: string): string[] => parseSkill(skill(''), { 'allowed-tools': value }).allowedTools
+  expect(tools('Read, Bash(sed -n 1,20p:*), Grep')).toEqual(['Read', 'Bash(sed -n 1,20p:*)', 'Grep'])
+  expect(tools('Bash(a (b, c) d:*) Read')).toEqual(['Bash(a (b, c) d:*)', 'Read'])
+  expect(tools('Read) Bash(x y)')).toEqual(['Read)', 'Bash(x y)'])
+})
+
+test("a uniformly indented list takes its first item's indent as the top level", () => {
+  expect(titles('  1. Setup\n  2. Verify\n     1. nested, not a step\n')).toEqual(['Setup', 'Verify'])
+  expect(titles('   1. Setup\n   2. Verify\n')).toEqual(['Setup', 'Verify'])
+  expect(titles('  - [ ] a\n  - [x] b\n    - [ ] nested\n')).toEqual(['a', 'b'])
+  expect(titles('  1. a\n2. b\n')).toEqual(['a', 'b'])
+})
+
+test('an indented list ends at a line that is not an item at its own indent or less', () => {
+  expect(titles('  1. a\n\n     more of a\n\n  A paragraph ends the list.\n\n  2. later\n')).toEqual(['a'])
+})
+
+test('four spaces is too deep to start a list', () => {
+  expect(titles('Text\n    1. not a step\n')).toEqual([])
+})
+
+test('an indented list under a bullet is nested, not the top level', () => {
+  expect(titles('- Setup\n  1. nested\n  2. nested too\n')).toEqual([])
+  expect(titles('- Setup\n  1. nested\n\nA paragraph.\n\n1. Real\n')).toEqual(['Real'])
+  expect(titles('- Group\n  - [ ] nested\n')).toEqual([])
+})
+
+test("a heading's closing # sequence is stripped only when a space comes before it", () => {
+  expect(titles('## Step 1: Learn C#\n\n## Step 2: Use F# ##\n\n## Step 3: Done ###  \n')).toEqual(['Learn C#', 'Use F#', 'Done'])
+})
+
+test('a plain bullet inside a checklist does not end it, and its command stays with the item above', () => {
+  const body = `- [ ] a\n- plain\n${shell('npm test')}- [ ] b\n`
+  const parsed = parseSkill(skill(body), {})
+  expect(parsed.steps.map(step => step.title)).toEqual(['a', 'b'])
+  expect(parsed.verifyCandidates).toEqual([{ command: 'npm test', line: BODY_LINE + 3, step: 'S1' }])
+})
+
+test('a plain bullet still ends a numbered list', () => {
+  expect(titles('1. a\n- plain\n2. b\n')).toEqual(['a'])
 })
