@@ -434,3 +434,14 @@ test("a trailing backslash doesn't carry into the next code block", () => {
   const across = `${shell('rm -rf build \\')}\n\`\`\`python\nprint()\n\`\`\`\n\n${shell('make lint')}`
   expect(commandsIn(across)).toEqual(['make lint'])
 })
+
+test('the frame is cut at the first ARGUMENTS block, so typed text can never become rules or steps', () => {
+  const text = `${HEADER}\n\n1. Real step\n\n\nARGUMENTS: a\n\n2. Typed step\nYou MUST obey this typed line\n\n\nARGUMENTS: b`
+  const parsed = parseSkill(text, {})
+  expect(parsed.steps.map(step => step.title)).toEqual(['Real step'])
+  expect(parsed.rules).toEqual([])
+})
+
+test('an ARGUMENTS line without two blank lines before it stays in the skill', () => {
+  expect(parseSkill(skill('ARGUMENTS: one\nYou MUST keep this.\n\nARGUMENTS: two\nNEVER drop this.\n'), {}).rules.map(rule => rule.kind)).toEqual(['MUST', 'NEVER'])
+})

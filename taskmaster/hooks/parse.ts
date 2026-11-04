@@ -55,14 +55,13 @@ function body(text: string): { text: string; number: number }[] {
     const close = all.findIndex((line, index) => index > start && line.text.trim() === '---')
     if (close !== -1) start = close + 1
   }
-  let end = all.length
-  for (let index = all.length - 1; index >= 2; index -= 1) {
-    if (all[index]?.text.startsWith(ARGUMENTS) && all[index - 1]?.text === '' && all[index - 2]?.text === '') {
-      end = index
-      break
-    }
-  }
-  return all.slice(start, end)
+  // The first ARGUMENTS block, not the last: typed text can repeat the pattern,
+  // and must never become skill rules. The cost is that a body holding this exact
+  // pattern loses its tail, which drops requirements rather than inventing them.
+  const end = all.findIndex(
+    (line, index) => line.text.startsWith(ARGUMENTS) && all[index - 1]?.text === '' && all[index - 2]?.text === '',
+  )
+  return all.slice(start, end === -1 ? all.length : end)
 }
 
 /** Marks each line inside a fenced code block, whatever the fence's indent, with the block's language. */
