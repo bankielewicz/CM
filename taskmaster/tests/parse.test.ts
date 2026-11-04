@@ -731,3 +731,15 @@ test('a line that starts inside arithmetic is still read for commands', () => {
   const [command] = commandsIn(shell('((cd a);', 'npm test)'))
   expect(command?.startsWith('npm test')).toBe(true)
 })
+
+test('a spaced thematic break opens no list', () => {
+  expect(titles('* * *\nIntro text.\n\n  1. Setup\n  2. Verify\n')).toEqual(['Setup', 'Verify'])
+  expect(titles('- - -\nIntro text.\n\n  1. Setup\n  2. Verify\n')).toEqual(['Setup', 'Verify'])
+  expect(rulesIn('* * *\nIntro text.\n\n    MUST four\n')).toEqual([])
+})
+
+test('a spaced thematic break ends a list at its indent, and a deeper one stays in it', () => {
+  expect(titles('1. a\n- - -\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n* * *\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n   - - -\n2. b\n')).toEqual(['a', 'b'])
+})

@@ -95,7 +95,8 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       codeMayStart = blank
       const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}) }
       afterText = !blank
-      if (LIST_ITEM.test(line.text)) listIndent = Math.min(listIndent ?? Number.POSITIVE_INFINITY, line.text.search(/\S/))
+      // `* * *` and `- - -` have a list marker's shape, and are thematic breaks.
+      if (LIST_ITEM.test(line.text) && !THEMATIC_BREAK.test(line.text)) listIndent = Math.min(listIndent ?? Number.POSITIVE_INFINITY, line.text.search(/\S/))
       else if (listIndent !== undefined && endsList(marked, listIndent)) listIndent = undefined
       return marked
     }
