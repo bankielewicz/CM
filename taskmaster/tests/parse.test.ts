@@ -553,3 +553,82 @@ test('a line that only looks like a fence, inside a code block, leaves an open h
   expect(commandsIn(shell('cat <<EOF', '```x```', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn('~~~bash\ncat <<EOF\n```\nnpm test\nEOF\nmake lint\n~~~\n')).toEqual(['make lint'])
 })
+
+test('a heredoc delimiter is the whole word, with its quotes removed', () => {
+  const spellings: [string, string][] = [
+    ["<<'EOF-JSON'", 'EOF-JSON'],
+    ['<<"END OF"', 'END OF'],
+    ["<<'123'", '123'],
+    ['<<EOF-JSON', 'EOF-JSON'],
+    ['<<123', '123'],
+    ['<<\\EOF', 'EOF'],
+    ['<<E"O"F', 'EOF'],
+    ["<<a'b c'd", 'ab cd'],
+    ["<< 'A B'", 'A B'],
+    ['<<\t EOF', 'EOF'],
+    ['<<-EOF', 'EOF'],
+    ['<<- EOF', 'EOF'],
+    ["<<-'A-B'", 'A-B'],
+  ]
+  for (const [open, word] of spellings) {
+    expect(commandsIn(shell(`cat ${open}`, 'npm test', word, 'make lint'))).toEqual(['make lint'])
+  }
+})
+
+test('an unquoted heredoc delimiter stops at whitespace or a shell metacharacter', () => {
+  for (const stop of [' ', ';', '&', '|', '<', '>', '(', ')']) {
+    expect(commandsIn(shell(`cat <<EOF${stop}x`, 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  }
+})
+
+test("a quoted delimiter's quotes don't change how the rest of its line reads", () => {
+  expect(commandsIn(shell("cat <<'a;b' && npm run build", 'npm test', 'a;b', 'go vet'))).toEqual(['npm run build', 'go vet'])
+})
+
+test('a part of a longer delimiter does not end its heredoc', () => {
+  expect(commandsIn(shell("cat <<'EOF-JSON'", 'EOF', 'npm test', 'EOF-JSON', 'make lint'))).toEqual(['make lint'])
+})
+
+test('a terminator must match the whole line, and only <<- allows leading tabs', () => {
+  for (const line of ['  EOF', '\tEOF', 'EOF ', 'EOFX', 'xEOF']) {
+    expect(commandsIn(shell('cat <<EOF', line, 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  }
+  expect(commandsIn(shell('cat <<-EOF', 'npm test', '\t\tEOF', 'make lint'))).toEqual(['make lint'])
+  for (const line of ['  EOF', '\t EOF', 'EOF ']) {
+    expect(commandsIn(shell('cat <<-EOF', line, 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  }
+})
+
+test('each heredoc on a line keeps its own terminator rule', () => {
+  expect(commandsIn(shell('cat <<-A <<B', '\tA', 'npm test', '\tB', 'make lint', 'B', 'go vet'))).toEqual(['go vet'])
+})
+
+test("a terminator is matched after the code block's own indent comes off, and no more than that", () => {
+  const block = (...lines: string[]): string => `1. Write it.\n\n   \`\`\`bash\n${lines.join('\n')}\n   \`\`\`\n`
+  expect(commandsIn(block('   cat <<-EOF', '   npm test', '   \tEOF', '   make lint'))).toEqual(['make lint'])
+  expect(commandsIn(block('   cat <<EOF', '     EOF', '   npm test', '   EOF', '   make lint'))).toEqual(['make lint'])
+  expect(commandsIn(block('   cat <<EOF', '   npm test', 'EOF', '   make lint'))).toEqual(['make lint'])
+})
+
+test('with nothing to read as a delimiter, or an unclosed quote, no heredoc opens', () => {
+  for (const line of ['cat <<(x', "cat <<''", "cat <<'EOF", 'cat <<"EOF', 'cat <<EOF"']) {
+    expect(commandsIn(shell(line, 'x', 'npm test'))).toEqual(['npm test'])
+  }
+})
+
+test('<< inside arithmetic opens no heredoc, with or without the $', () => {
+  for (const line of ['((x = 1 << 2))', 'echo $(( (1+2) << 3 ))', 'echo $((a<<b))', 'grep x <<<EOF']) {
+    expect(commandsIn(shell(line, 'npm test'))).toEqual(['npm test'])
+  }
+})
+
+test('arithmetic ends where its parentheses do, so the rest of the line reads as usual', () => {
+  expect(commandsIn(shell('x=$((1<<2)); npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('((a || b)) && npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('echo $((1<<2)) <<EOF', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+})
+
+test('a single parenthesis is not arithmetic, so a heredoc inside one still opens', () => {
+  expect(commandsIn(shell('x=$(cat <<EOF', 'npm test', 'EOF', ')', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('(cat <<EOF', 'npm test', 'EOF', ')', 'make lint'))).toEqual(['make lint'])
+})

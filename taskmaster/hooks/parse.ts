@@ -31,8 +31,8 @@ const VERIFY: readonly RegExp[] = [
 const INDENTED = 'indented'
 const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/
 
-/** `fence`: the line is a code fence itself. `inList`: a list was open when this line began. */
-type Line = { text: string; number: number; code?: { lang: string; fence?: true }; inList?: boolean }
+/** `fence`: the line is a code fence itself. `indent`: the fence's, on the lines inside it. `inList`: a list was open when this line began. */
+type Line = { text: string; number: number; code?: { lang: string; fence?: true; indent?: number }; inList?: boolean }
 
 /** A step and the lines that belong to it, for placing commands under steps. */
 type Span = { step: ParsedStep; end: number }
@@ -72,7 +72,7 @@ function body(text: string): { text: string; number: number }[] {
  * rules count. A list ends at the first other line at column 0, as in listSteps.
  */
 function classify(lines: { text: string; number: number }[]): Line[] {
-  let fence: { marker: string; lang: string } | undefined
+  let fence: { marker: string; lang: string; indent: number } | undefined
   let inList = false
   let codeMayStart = true
   return lines.map(line => {
@@ -80,7 +80,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)(.*)$/.exec(line.text)
       // A backtick fence's opening line can't hold another backtick: that's inline code.
       if (open?.[1] && !(open[1].startsWith('`') && open[3]?.includes('`'))) {
-        fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase() }
+        fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase(), indent: line.text.search(/\S/) }
         codeMayStart = false
         return { ...line, code: { lang: '', fence: true } }
       }
@@ -98,7 +98,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       fence = undefined
       return { ...line, code: { lang: '', fence: true } }
     }
-    return { ...line, code: { lang: current.lang } }
+    return { ...line, code: { lang: current.lang, indent: current.indent } }
   })
 }
 
@@ -192,19 +192,48 @@ function rules(lines: Line[]): ParsedRule[] {
   return found
 }
 
-const HEREDOC = /^<<-?\s*(?:\\|['"])?([A-Za-z_]\w*)/
+/** A heredoc's terminator. `stripTabs`: opened with `<<-`, so leading tabs don't count. */
+type Heredoc = { word: string; stripTabs: boolean }
+
+/**
+ * Reads the heredoc opened by the `<<` at `at`: the whole delimiter word, with its
+ * quotes and backslashes removed, and where it ends. No word, or an unclosed
+ * quote, opens nothing.
+ */
+function readHeredoc(text: string, at: number): { heredoc: Heredoc; end: number } | undefined {
+  const stripTabs = text[at + 2] === '-'
+  let cursor = at + (stripTabs ? 3 : 2)
+  while (text[cursor] === ' ' || text[cursor] === '\t') cursor += 1
+  let word = ''
+  for (; cursor < text.length; cursor += 1) {
+    const char = text[cursor] as string
+    if (/[\s;&|<>()]/.test(char)) break
+    if (char === '\\') {
+      cursor += 1
+      word += text[cursor] ?? ''
+    } else if (char === "'" || char === '"') {
+      const close = text.indexOf(char, cursor + 1)
+      if (close === -1) return undefined
+      word += text.slice(cursor + 1, close)
+      cursor = close
+    } else word += char
+  }
+  return word ? { heredoc: { word, stripTabs }, end: cursor } : undefined
+}
+
 /** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
 const ENV_PREFIX = /^(?:[A-Za-z_]\w*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])*\s+)+/
 
 /**
  * One shell line's `&&`, `||` and `;` segments, and the terminators of any
- * heredocs it opens. It reads quotes and comments, and little else: this is not
- * a shell parser.
+ * heredocs it opens. It reads quotes, comments and arithmetic, and little else:
+ * this is not a shell parser.
  */
-function readShell(text: string): { segments: string[]; heredocs: string[] } {
+function readShell(text: string): { segments: string[]; heredocs: Heredoc[] } {
   const segments: string[] = []
-  const heredocs: string[] = []
+  const heredocs: Heredoc[] = []
   let quote = ''
+  let arithmetic = 0
   let start = 0
   let end = text.length
   for (let at = 0; at < end; at += 1) {
@@ -212,14 +241,22 @@ function readShell(text: string): { segments: string[]; heredocs: string[] } {
     if (char === '\\' && quote !== "'") at += 1
     else if (quote) quote = char === quote ? '' : quote
     else if (char === '"' || char === "'") quote = char
-    else if (char === '#' && (at === 0 || /\s/.test(text[at - 1] as string))) end = at
+    else if (arithmetic > 0) arithmetic += char === '(' ? 1 : char === ')' ? -1 : 0
+    else if (text.startsWith('((', at)) {
+      // Inside $((…)) or ((…)), << is a shift, so nothing there can open a heredoc.
+      arithmetic = 2
+      at += 1
+    } else if (char === '#' && (at === 0 || /\s/.test(text[at - 1] as string))) end = at
     else if (char === ';' || text.startsWith('&&', at) || text.startsWith('||', at)) {
       segments.push(text.slice(start, at))
       start = at + (char === ';' ? 1 : 2)
       at = start - 1
-    } else if (char === '<' && text[at - 1] !== '<') {
-      const terminator = HEREDOC.exec(text.slice(at))?.[1]
-      if (terminator) heredocs.push(terminator)
+    } else if (text.startsWith('<<<', at)) at += 2
+    else if (text.startsWith('<<', at)) {
+      const found = readHeredoc(text, at)
+      if (found) heredocs.push(found.heredoc)
+      // The word's quotes are spent, so it's stepped over. With no word, only the << is.
+      at = found ? found.end - 1 : at + 1
     }
   }
   segments.push(text.slice(start, end))
@@ -230,7 +267,7 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   const found: VerifyCandidate[] = []
   const seen = new Set<string>()
   let pending: { text: string; line: number } | undefined
-  let heredocs: string[] = []
+  let heredocs: Heredoc[] = []
   for (const line of lines) {
     const fence = line.code?.fence === true
     if (fence) {
@@ -239,9 +276,11 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
       heredocs = []
     }
     if (!line.code || !SHELLS.has(line.code.lang) || fence) continue
-    if (heredocs.length > 0) {
-      // Trimmed, not exact: a block inside a list item indents its terminator too.
-      if (line.text.trim() === heredocs[0]) heredocs.shift()
+    const heredoc = heredocs[0]
+    if (heredoc) {
+      // The whole line, once the block's own indent is off: a block inside a list item indents its terminator too.
+      const inBlock = line.text.replace(/^\s+/, leading => leading.slice(line.code?.indent))
+      if ((heredoc.stripTabs ? inBlock.replace(/^\t+/, '') : inBlock) === heredoc.word) heredocs.shift()
       continue
     }
     const text = line.text.trim().replace(/^\$\s+/, '')
