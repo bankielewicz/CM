@@ -323,3 +323,17 @@ test('the same command under two steps is a candidate for each step', () => {
     ['npm test', 'S3'],
   ])
 })
+
+const commandsIn = (body: string): string[] => parseSkill(skill(body), {}).verifyCandidates.map(c => c.command)
+const shell = (...lines: string[]): string => `\`\`\`bash\n${lines.join('\n')}\n\`\`\`\n`
+
+// ------------------------------------------------------------ PR #9's review
+
+test('CRLF line endings read the same as LF, with the same line numbers', () => {
+  for (const body of [NUMBERED, CHECKLIST, '## Step 1: Plan\n\nYou MUST plan.\n\n## Step 2: Do\n']) {
+    const text = `${skill(body)}\n\n\nARGUMENTS: You MUST not leak`
+    const parsed = parseSkill(text.replace(/\n/g, '\r\n'), {})
+    expect(parsed.steps.length).toBeGreaterThan(0)
+    expect(parsed).toEqual(parseSkill(text, {}))
+  }
+})

@@ -47,7 +47,7 @@ export function parseSkill(text: string, frontmatter: Readonly<Record<string, un
 
 /** The body's lines with their 1-based numbers in the full text: header, YAML block and ARGUMENTS left out. */
 function body(text: string): { text: string; number: number }[] {
-  const all = text.split('\n').map((line, index) => ({ text: line, number: index + 1 }))
+  const all = text.split('\n').map((line, index) => ({ text: line.replace(/\r$/, ''), number: index + 1 }))
   let start = 0
   if (all[0]?.text.startsWith(HEADER)) start = 1
   while (all[start]?.text.trim() === '') start += 1
