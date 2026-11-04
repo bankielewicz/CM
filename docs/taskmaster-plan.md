@@ -119,7 +119,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
   ```
 - **F1.8 Per-skill user override (for third-party skills):** the first time a skill runs, the Pane shows the extracted contract. `/taskmaster contract edit <skill>` lets the user fix it, and saves it to the **personal layer** (F1.9). That contract is then `enforce` for that skill version. Only a person can make a change that loosens it (F17).
 
-- **F1.9 Override storage:** `.taskmaster/overrides/<skill>.json` in the project (under `overrideDir`), committed with the checkpoints so the team shares it, mirrored in `$.store`. F16 is the guided way to create one.
+- **F1.9 Override storage:** a personal entry in `$.store`, and `.taskmaster/overrides/<skill>.json` in the project (under `overrideDir`), which a person commits so the team shares it. Checkpoint commits leave the file out (F17). F16 is the guided way to create either.
   - **JSON, not YAML** (owner decision, 2026-11-04). The mod API has no YAML parser, and a mod has no npm packages. Frontmatter is YAML, but it arrives already parsed.
   - **The file holds the `taskmaster:` block itself**, not `{ "taskmaster": … }`, with the same keys and checks. For example:
     ```json
@@ -127,11 +127,12 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
       "steps": [ { "id": "tests", "title": "Run the test suite", "verify": { "bash": "npm test" } } ],
       "confirm_before": [] }
     ```
-  - **Two layers** (owner decision, 2026-11-04):
-    - **The project layer** is the file above: shared, committed and reviewed.
-    - **The personal layer** is an entry in `$.store`, keyed by repository and skill: edits you don't want to commit. `$.store` is per user and per machine, and doesn't survive a fresh cloud container.
-    - **Open question for the owner:** which layer wins when both exist, and whether an override may beat a third-party skill's own frontmatter.
-    - Both layers are protected as F17 says.
+  - **Two layers** (owner decisions, 2026-11-04):
+    - **The personal layer** is an entry in `$.store`, keyed by repository and skill: edits you don't want to commit. `$.store` is per user and per machine, and doesn't survive a fresh cloud container. **It wins when both exist.**
+    - **The project layer** is the file above: shared, committed and reviewed. The mod reads it each time there's no personal entry, as in a fresh cloud container or on a teammate's machine. It never copies the file into the store, so a change to the file reaches everyone without a personal entry, and the mod needn't know whether it runs on a PC or in the cloud.
+    - **The file is opt-in.** A person writes it to share a contract: F16's apply with the project layer, or `/taskmaster contract export <skill>` (Phase 2, with `contract edit`, which starts from the file's contract when there is one).
+    - **Open question for the owner:** whether an override may beat a third-party skill's own frontmatter.
+    - Both layers are protected as F17 says. A project file that loosens what it replaces needs the person's yes, once per file version and store, unless `overrideTrust: default-branch` trusts it (F17.1).
   - **The file is named after the skill as `skill.prompt` names it,** with anything but letters, digits, `.`, `-` and `_` changed to `_`. A plugin's skill arrives plugin-qualified, so `acme:notes` reads `acme_notes.json`; a hand-made `notes.json` won't match it.
 
 ### F2. Ledger: the mod's own record (source of truth)
@@ -253,7 +254,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
 - `metrics` (on), `metricsDir` (`.taskmaster/metrics`), `ratingSample` (1 in 3 runs, at most once per hour), `sentimentClassifier` (off; opt-in, because it reads the user's next prompt), `metricsWebhook` (off; optional `$.http.fetch` sink)
 - `experiment` (`off` | `on`), `experimentWeights` (`baseline` / `generic` / `frontmatter`), `experimentBlind` (hide the arm label so ratings aren't biased)
 - `rca` (`manual` | `auto` | `off`), `rcaModel`, `rcaDailyCap` (5), `circuitBreakerThreshold` (3 user friction signals per session)
-- `frontmatterNudges` (on), `overrideDir` (`.taskmaster/overrides`)
+- `frontmatterNudges` (on), `overrideDir` (`.taskmaster/overrides`), `overrideTrust` (`ask` | `default-branch`; F17.1)
 
 ### F13. Metrics and experiments: quantify results and user experience
 
@@ -412,7 +413,7 @@ A user asks Claude to read a skill and recommend Taskmaster frontmatter for it. 
   - **repo facts for verify specs:** the test, lint, and build commands found in `package.json` scripts, `Makefile`, `pyproject.toml`, `Cargo.toml`, and so on.
 - **`taskmaster_frontmatter_validate { target, yaml }`** runs the deterministic lint (F16.7) and returns errors and warnings. A recommendation must pass it before it's shown.
 - **`taskmaster_frontmatter_apply { suggestion_id, targets[], mode }`** records the decision.
-  - `mode: override`: the mod writes `.taskmaster/overrides/<skill>.json` itself (F1.9's format and name).
+  - `mode: override`: the mod writes the override itself, to the layer the person picks (F1.9): the personal layer by default, or `.taskmaster/overrides/<skill>.json` in F1.9's format and name.
   - `mode: file`: it returns the exact edit for Claude to make with the normal `Edit` tool. **The mod doesn't write skill files itself**, so the user's usual permission prompt and diff view apply.
 
 **F16.4 Workflow**
@@ -523,11 +524,105 @@ The mod's own code is covered by visibility only.
    - Seen live on 2.1.317: in default and accept-edits modes, a `-p` run refused the write, and the file wasn't created.
    - Bypass mode is untested, because the cloud sandbox won't start one.
    - The Bash part is best effort: a command can name a path indirectly.
-5. **A session copy of the personal layer in `$.state`.** `$.state` lives in the engine's memory, not on disk. A later read of `$.store` that differs from the mod's own last write is evidence of tampering: the mod ignores it and files an incident.
+5. **A session copy of the personal layer in `$.state`.** `$.state` lives in the engine's memory, not on disk. A later read of `$.store` in the same session that differs from the mod's own last write is evidence of tampering: the mod ignores it and files an incident.
+   - **This covers one session only.** A store edited through the shell in one session takes effect when the next session starts, and no copy is left to compare. Across sessions, only the guard (4) protects the personal layer.
 6. **Visibility, the backstop for what the guard misses:**
    - The summary below each answer (F11) names the contract's source whenever it's an override, and flags a contract that is looser than what it replaced.
    - Any tool call that touches a protected path trips an F15.1 canary, with the RCA category *model gaming*.
    - Checkpoint commits leave `overrides/` out (F8.1), so the mod's own commit never turns an unapproved edit into history that looks reviewed.
+
+**F17.1 Trusting the default branch: the override guard** (owner decision, 2026-11-04). In a fresh cloud container the store is empty, so each project file that loosens a contract would ask again. A repository can instead hold override changes when they're reviewed:
+- **The CI check.** Taskmaster ships a workflow template that holds any pull request changing a file under `overrideDir` until the owner approves it. It flags every change, tightening included. A loosening-only check, which would run the base branch's `contract.ts` on the files as data, is a later refinement.
+- **Why an environment, not a PR review.** Claude opens pull requests under the owner's account, and GitHub doesn't let an author approve their own pull request, so neither a PR review nor a CODEOWNERS rule can hold them. The approval is a GitHub environment, `taskmaster-overrides`, with the owner as its required reviewer and *Prevent self-review* off. The owner approves in the run's *Review deployments* dialog, or with `gh api`. Environments with reviewers are available for public repositories on every plan, and for private ones on paid plans.
+- **The mod's side,** with `overrideTrust: default-branch` (F12, opt-in). A project file whose content matches the default branch's version applies without asking: with the check required and no bypass, every change on that branch was approved. The mod fetches the default branch itself, so a moved local ref can't fake a match, and the guard (4) also watches `git remote set-url`, `git update-ref` and writes under `.git/`. The default, `ask`, is right for a repository without the check, because the mod can't tell whether one runs.
+- **The residual.** The approval rests on the owner's GitHub account, and Claude works through credentials that act as that account. The GitHub tools in this cloud session have no method to approve a deployment (checked 2026-11-04), but a shell call to the API might succeed if the session's token allows it. So this approval is a guard rail like the rest of F17, not the outside authority below. To narrow it:
+  - deny `gh api` calls on `pending_deployments` in `.claude/settings.json`, for example `"Bash(gh api *pending_deployments*)"`, and check the rule with `/permissions`,
+  - check that the Claude GitHub App's repository permissions don't let it approve deployments.
+- **The template** (P1.7c ships it as `taskmaster/templates/override-guard.yml`):
+
+```yaml
+# Holds a pull request that changes a taskmaster override file until the owner approves it
+# (taskmaster plan F17.1). Copy it to .github/workflows/taskmaster-override-guard.yml.
+#
+# pull_request_target runs this file from the base branch, so a pull request can't edit the
+# check for itself. It never checks out or runs pull request code: it reads only the list of
+# changed file names.
+#
+# Setup, once:
+# 1. Settings > Environments > New environment, named taskmaster-overrides. Add yourself as a
+#    required reviewer. Leave "Prevent self-review" off: Claude opens pull requests under your
+#    account, so with it on nobody could approve them.
+# 2. Once this file is on the default branch, make both jobs, override-changes and
+#    override-approval, required status checks. A required check can't report on the pull
+#    request that adds it. Both are needed, because override-approval is skipped, which
+#    counts as a pass, both when no override file changed and when override-changes fails.
+# 3. If you changed taskmaster's overrideDir setting, change OVERRIDE_DIR below to match.
+#
+# Each new push, and each edit of the pull request, asks for approval again. Skipping the
+# approval on an edit would let that skipped run count as a pass.
+name: Taskmaster override guard
+
+on:
+  pull_request_target:
+    # edited, because retargeting a pull request onto the default branch must run this too.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  OVERRIDE_DIR: .taskmaster/overrides
+
+jobs:
+  override-changes:
+    name: override-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      touched: ${{ steps.list.outputs.touched }}
+    steps:
+      - name: List the override files this pull request changes
+        id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          # GitHub lists at most 3000 files, so a longer list could hide an override file.
+          if [ "$CHANGED_FILES" -ge 3000 ]; then
+            echo "::error::This pull request changes too many files to check for override files."
+            exit 1
+          fi
+          gh api "repos/$REPOSITORY/pulls/$PR_NUMBER/files" --paginate \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/changed.txt"
+          touched=false
+          while IFS= read -r path; do
+            case "$path" in
+              "$OVERRIDE_DIR"/*)
+                if [ "$touched" = false ]; then
+                  printf '### Override files this pull request changes\n\n' >> "$GITHUB_STEP_SUMMARY"
+                fi
+                touched=true
+                # A file name comes from the pull request, so keep it inside a code span.
+                printf -- '- `%s`\n' "${path//\`/}" >> "$GITHUB_STEP_SUMMARY"
+                ;;
+            esac
+          done < "$RUNNER_TEMP/changed.txt"
+          echo "touched=$touched" >> "$GITHUB_OUTPUT"
+
+  override-approval:
+    name: override-approval
+    needs: override-changes
+    if: needs.override-changes.outputs.touched == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: taskmaster-overrides
+    steps:
+      - name: Approved
+        run: echo "The owner approved this pull request's override changes."
+```
 
 **Future work, for teams that need a real guarantee:** an authority outside the process.
 - Managed settings owned by root, with permission deny rules on the protected paths, and Claude running as a non-root user.
@@ -578,7 +673,7 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 | Comparing frontmatter vs none is confounded | Paired design: the same skills with and without frontmatter; arms assigned per run by hash |
 | Suggested frontmatter over-enforces a skill | Must pass validation (grounding, runnable verify, conditional-language checks); user review required; `advisory` when unsure; performance tracked per origin |
 | Advisor edits a file it shouldn't (another author's or managed) | Target chosen by skill source; installed and managed skills get an override plus an upstream suggestion |
-| Claude edits its own contract, overrides or settings to loosen enforcement | F17: a run keeps its contract; loosening needs the person's yes in `$.ui.ask`; a `tool.check` guard sends writes to protected paths to a person; override sources and loosened contracts are shown; checkpoint commits leave `overrides/` out |
+| Claude edits its own contract, overrides or settings to loosen enforcement | F17: a run keeps its contract; loosening needs the person's yes in `$.ui.ask`; a `tool.check` guard sends writes to protected paths to a person; override sources and loosened contracts are shown; checkpoint commits leave `overrides/` out; with `overrideTrust: default-branch`, a CI check holds override changes until the owner approves them (F17.1) |
 | Edit damages a skill | Edits go through the normal `Edit` tool with its permission prompt; post-check allows only the `taskmaster:` key to change; never committed automatically |
 
 ## 9. Build order
@@ -612,6 +707,8 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
   - The model can't run a plugin's registered command: the `Skill` tool refuses it.
   - A typed command in a `-p` run carries `origin: { kind: 'sdk' }`, not `composer`.
   - A command typed in the Claude app, in a cloud session, carries `origin: { kind: 'composer' }` (the `/tm-origin` probe, 2026-11-04). The app shows a command's text reply after the command's name (`tm-origin: <text>`), so a reply needn't repeat the name.
+  - Pull requests Claude opens in this repository are authored by the owner's account, so the owner can't approve them in a PR review (F17.1).
+  - The GitHub tools in this cloud session can run, re-run and cancel workflow runs, but have no method to approve a deployment.
 - **Learned in P1.2.**
   - `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, with no YAML block. A typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. Checked live: the capture's hash matched that form, and `/notes some words here` showed the block.
   - So a hash of the whole text changes with the skill's folder and with every argument. Contract caches and resume checks key on the body alone.

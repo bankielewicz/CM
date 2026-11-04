@@ -26,7 +26,9 @@ Report the commands with their output. `main` is protected, so each task (or a s
 3. **The spike (P1.0b).** Delete it, in the two PRs and the order P1.0b gives.
 4. **`sentimentClassifier` waits** (PR #6 review). It's F13.3's optional label of your next prompt after a block. No Phase 1 task builds it, and a privacy setting that does nothing would mislead, so it isn't a setting yet. It comes back with the task that builds it.
 5. **Override files are JSON** (2026-11-04, for P1.3). The mod API has no YAML parser, so `.taskmaster/overrides/<skill>.json` holds the `taskmaster:` block's object (plan F1.9).
-6. **A personal layer beside the project file, protected against Claude** (2026-11-04). Personal overrides go in `$.store`, keyed by repository and skill. No change made by Claude loosens a contract without the person's yes. **Still open:** which layer wins when both exist, and whether an override may beat a third-party skill's own frontmatter (P1.7b).
+6. **A personal layer beside the project file, protected against Claude** (2026-11-04). Personal overrides go in `$.store`, keyed by repository and skill. No change made by Claude loosens a contract without the person's yes. Decision 7 settles which layer wins. **Still open:** whether an override may beat a third-party skill's own frontmatter (P1.7b).
+7. **The personal layer wins, and the project file is read live** (2026-11-04). The mod takes the person's `$.store` entry first. When there is none, as in a fresh cloud container or on a teammate's machine, it reads the project file, every time: nothing copies the file into the store, so a change to the file reaches everyone without a personal entry. The file is opt-in, written by a person to share a contract (plan F1.9).
+8. **A project file that matches the default branch can count as reviewed** (2026-11-04). This needs the repository to run the override guard: a CI check that holds a pull request changing an override file until the owner approves it in a GitHub environment (plan F17.1). The mod can't tell whether a repository runs it, so the trust is opt-in, `overrideTrust: default-branch`. The default, `ask`, asks about a loosening file once per file version and store (P1.7c).
 
 ## M0. Scaffold
 - [x] P1.0 **Scaffold the mod** (F12, F14). **Done: merged in PR #6.** Create `taskmaster/.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`, `types/` and `tests/`, with a test `engine()` helper like the spike's. Add the Phase 1 keys of `userConfig` (F12). At `session.start`, build the `Io` table and flush buffered early events. A startup self-check logs which events fired on this build (F14).
@@ -133,7 +135,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
 - [ ] P1.7 **The three tools** (F3). `taskmaster_waive`, `taskmaster_await_user` and `taskmaster_checkpoint`, each registered with `isDeferred: false`. At `strict`, a waiver needs the user's yes through `$.ui.ask`. **Red:** each tool updates the run state, and a strict-mode waiver without a yes is refused. *Depends on P1.6.*
 
 ## M3. Gates (F4 G1–G3, F5, §6)
-- [ ] P1.7b **Guard the contract's levers, and add the personal layer** (F17, F1.8, F1.9; owner decision 6). This must land before the gates enforce anything, and P1.8–P1.10 depend on it.
+- [ ] P1.7b **Guard the contract's levers, and add the personal layer** (F17, F1.8, F1.9; owner decisions 6 and 7). This must land before the gates enforce anything, and P1.8–P1.10 depend on it.
   - **Protected paths:**
     - `<root>/<overrideDir>/**`,
     - the mod's `$.store` file (`~/.claude/plugins/store/taskmaster*`),
@@ -141,13 +143,22 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - settings files where a write touches the mod's `pluginConfigs`.
   - **The guard:** `tool.check` answers `ask` for `Write`, `Edit` and `NotebookEdit` on a protected path. It also answers `ask`, as a best effort, for non-read-only `Bash` that names a protected path, and for `Bash` that starts a nested `claude`, which could type a command and answer its dialog.
   - **Freeze and approval:** a run keeps the contract it started with. A change that loosens a contract (as F17 defines it) applies only after the person's yes in `$.ui.ask`, and never in a `-p` run. A change that only tightens applies at once.
-  - **The personal layer:** read from and written to `$.store`, keyed by repository and skill. It's written only by a typed `/taskmaster` command or after `$.ui.ask`. Its session copy lives in `$.state`, so a store that differs from the mod's last write is ignored and files an incident.
+  - **The two layers** (owner decision 7):
+    - The order: the person's `$.store` entry, keyed by repository and skill, then the project file, read each time there's no entry. Nothing copies the file into the store.
+    - The personal layer is written only by a typed `/taskmaster` command or after `$.ui.ask`. Its session copy lives in `$.state`, so a store that differs from the mod's last write in the same session is ignored and files an incident. Across sessions only the guard protects it (F17, mechanism 5).
+    - A project file that loosens the contract it replaces needs the person's yes. The yes is kept in `$.store`, keyed by repository, skill and the file's hash, so a changed file asks again, and so does a fresh cloud container. P1.7c adds `overrideTrust: default-branch`.
   - **Visibility:** the source of each override is recorded for P1.17's summary, and a loosened contract is flagged. A tool call that touches a protected path is recorded for P1.21's *model gaming* tripwire.
   - **Claude-facing text** never mentions overrides or the personal layer. A refused write says to ask the person, or to use `taskmaster_waive`.
-  - **Open questions for the owner, before this task starts:**
-    1. Which layer wins when both exist?
-    2. May an override beat a third-party skill's own frontmatter?
+  - **Open question for the owner, before this task starts:** may an override beat a third-party skill's own frontmatter? (Decision 7 settled which layer wins.)
   - **Checked live:** a command typed in the Claude app carries `origin: { kind: 'composer' }` (the `/tm-origin` probe, 2026-11-04). **Still to check live:** a plugin's `ask` in bypass mode.
+- [ ] P1.7c **Trust the default branch, behind the override guard** (F17.1, F12; owner decision 8).
+  - **The template:** ship F17.1's workflow as `taskmaster/templates/override-guard.yml`, with its setup steps in the README.
+  - **The setting:** `overrideTrust`, `ask` (the default) or `default-branch`, in `DEFAULTS`, `userConfig` and the F12 test.
+  - **The check:** with `default-branch`, a project file whose content matches the default branch's version applies without asking. The mod fetches the default branch itself, so a moved local ref can't fake a match. Any other file goes through P1.7b's approval. This task decides where the fetch runs: a hook doesn't wait on slow work, so perhaps once at `session.start`, kept for the session.
+  - **The guard grows:** with `default-branch`, `Bash` that runs `git remote set-url` or `git update-ref`, or writes under `.git/`, goes to a person, as a best effort. A fresh fetch defeats a moved ref, not a redirected remote.
+  - **Red:** a matching file applies without `$.ui.ask`. A file that differs, or a failed fetch, asks. With `ask`, a matching file still asks, unless the store already keeps a yes for that file version. The guard asks for `git update-ref`.
+  - **The owner's step, for this repository:** add the workflow under `.github/workflows/` with `gate-guard` lifted, create the `taskmaster-overrides` environment, and make both jobs required checks once the file is on `main`. The deny rule F17.1 suggests goes in `.claude/settings.json`, which is also the owner's to edit.
+  - *Depends on P1.7b. The gates don't depend on it, because `ask`, the default, is safe without it.*
 
   **Red:**
   - each guarded write gets `ask`, and an unguarded one doesn't,
