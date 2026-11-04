@@ -806,6 +806,10 @@ test("a nested item's own paragraph keeps its rule, at any depth", () => {
   expect(rulesIn('- a\n\n    - b\n\n      MUST six\n')).toEqual(['MUST'])
 })
 
+test('an item too deep to open a list opens none', () => {
+  expect(rulesIn('text\n    - not an item\n\n    You MUST not see code.\n')).toEqual([])
+})
+
 test('a list indented under a bullet stays nested, not a list of its own', () => {
   expect(titles('- a\n\n    1. nested\n')).toEqual([])
 })
