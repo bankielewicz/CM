@@ -75,7 +75,6 @@ These were learned live on build 2.1.317 and apply to the real mod too. Plan §9
 
 - New learnings about the mod API go into plan §9, and each task's status into `docs/phase-1-tasks.md`.
 - The default branch is protected and nobody can bypass the ruleset, so every change lands through a PR.
-- The spike is being retired as `docs/phase-1-tasks.md` P1.0b says, in this order:
-  1. Done: land the first real mod, `taskmaster/`, in PR #6. With no mods at all the gate fails, which blocks every merge.
-  2. Done: delete `spike/`, in PR #7. The gate ignores the leftover exemption entry.
-  3. The owner's step: a PR that changes `coverage-exempt.json` to `{}`, with the owner lifting `gate-guard` for it. Claude can't edit that file.
+- The spike is being retired as `docs/phase-1-tasks.md` P1.0b says. The first real mod, `taskmaster/`, had to land first, in PR #6: with no mods at all the gate fails, which blocks every merge. Then, in this order:
+  1. Done: delete `spike/`, in PR #7. The gate ignores the leftover exemption entry.
+  2. The owner's step: a PR that changes `coverage-exempt.json` to `{}`, with the owner lifting `gate-guard` for it. Claude can't edit that file.
