@@ -253,11 +253,32 @@ export function engine(on: On, options: EngineOptions = {}): World {
     reach('classic.TaskCompleted')
     return {}
   })
+  on('classic.SubagentStop', () => {
+    reach('classic.SubagentStop')
+    return {}
+  })
+  on('turn.step', async function* (_, e) {
+    reach('turn.step')
+    yield { kind: 'text', index: 0, text: 'engine chunk' }
+    return { turnId: e.turnId, index: e.index, answer: 'engine step', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
   return world
 }
 
 export async function start($: Engine): Promise<void> {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+}
+
+/** A model request, in the loop `agentId` names, read to its end. Gives the chunks and what the step answered. */
+export async function step($: Engine, agentId?: string) {
+  const stream = $.turn.step({ turnId: 'turn-1', index: 0, model: 'claude-test', messageCount: 1, ...(agentId ? { agentId } : {}) })
+  const chunks: unknown[] = []
+  let read = await stream.next()
+  while (!read.done) {
+    chunks.push(read.value)
+    read = await stream.next()
+  }
+  return { chunks, answer: read.value }
 }
 
 /** The self-check record now in the store, if any. */

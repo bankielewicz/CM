@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { contentHash, sameSkill, SaveQueue, SKILLS_SHAPE, SkillTracker } from '../hooks/skills'
 import type { SkillCapture } from '../types'
-import { engine, start, stateValue, until } from './engine'
+import { engine, start, stateValue, step, until } from './engine'
 import type { World } from './engine'
 
 // P1.1: capture each skill as it loads, and work out which loop it belongs to.
@@ -37,7 +37,7 @@ function typed($: Engine, name: string) {
   return $.prompt.submit({ text: `/${name}`, command: { name, args: '' }, wait: false, origin: { kind: 'composer' } })
 }
 
-function spawn($: Engine) {
+function spawn($: Engine, extra: { isTeammate?: true; workflow?: { runId: string; agentIndex: number }; resume?: { agentId: string } } = {}) {
   return $.agent.spawn({
     tool_use_id: 'toolu_spawn',
     prompt: 'Summarise the plan.',
@@ -47,6 +47,7 @@ function spawn($: Engine) {
     parentModel: 'claude-test',
     background: false,
     fork: false,
+    ...extra,
   })
 }
 
@@ -503,4 +504,131 @@ test('an agent\'s own Skill call and its own start agree', () => {
   tracker.skillCallOpened('toolu_1', 'notes', 'agent-1')
 
   expect(tracker.attribute('notes')).toEqual({ loop: { kind: 'agent', agentId: 'agent-1' }, via: 'skill-tool' })
+})
+
+// ----------------------------------------------- when the preload window ends
+
+// Seen live on 2.1.318, in this order: the agent's turn.start, agent.spawn's
+// answer, the preloaded skill.prompt (10-52 ms), its first turn.step (20-51 ms),
+// its first tool call (2.8-9.5 s). The engine waits for skill.prompt's hooks before
+// that first request.
+
+test('an agent stops being a preload target at its first model request', async ($, on) => {
+  const world = engine(on, { spawnAgentIds: ['agent-2'] })
+  await start($)
+  await spawn($)
+  await step($, 'agent-2')
+  await expand($)
+
+  expect((await only($, world)).via).toBe('unattributed')
+})
+
+test('another loop\'s model request does not end an agent\'s preload window', async ($, on) => {
+  const world = engine(on, { spawnAgentIds: ['agent-2'] })
+  await start($)
+  await spawn($)
+  await step($)
+  await step($, 'agent-3')
+  await expand($)
+
+  expect((await only($, world)).via).toBe('agent-preload')
+})
+
+test('an agent\'s turn.start does not end its preload window, because it fires before the preload', async ($, on) => {
+  const world = engine(on, { spawnAgentIds: ['agent-2'] })
+  await start($)
+  await spawn($)
+  await $.turn.start({ text: 'Summarise the plan.', turnId: 'turn-a2', agentId: 'agent-2' })
+  await expand($)
+
+  expect((await only($, world)).via).toBe('agent-preload')
+})
+
+test('an agent that stops ends its preload window', async ($, on) => {
+  const world = engine(on, { spawnAgentIds: ['agent-2'] })
+  await start($)
+  await spawn($)
+  await $.classic.SubagentStop({
+    stop_hook_active: false,
+    agent_id: 'agent-2',
+    agent_transcript_path: '/repo/agent-2.jsonl',
+    agent_type: 'notes-writer',
+  })
+  await expand($)
+
+  expect((await only($, world)).via).toBe('unattributed')
+})
+
+test('an agent that acted before its spawn answered opens no preload window', async ($, on) => {
+  const world = engine(on, {
+    spawnAgentIds: ['agent-2'],
+    during: { agentSpawn: () => $.tool.call({ tool: 'Read', file_path: '/repo/a.txt', agentId: 'agent-2' }) },
+  })
+  await start($)
+  await spawn($)
+  await expand($)
+
+  expect((await only($, world)).via).toBe('unattributed')
+})
+
+test('a teammate opens no preload window: one in its own pane fires nothing here', async ($, on) => {
+  const world = engine(on, { spawnAgentIds: ['agent-2'] })
+  await start($)
+  await spawn($, { isTeammate: true })
+  await expand($)
+
+  expect((await only($, world)).via).toBe('unattributed')
+})
+
+test('a workflow agent opens no preload window: a remote one has no local loop', async ($, on) => {
+  const world = engine(on, { spawnAgentIds: ['agent-2'] })
+  await start($)
+  await spawn($, { workflow: { runId: 'wf_1', agentIndex: 1 } })
+  await expand($)
+
+  expect((await only($, world)).via).toBe('unattributed')
+})
+
+test('a resumed run opens no preload window: preloads come before an agent\'s first turn', async ($, on) => {
+  const world = engine(on, { spawnAgentIds: ['agent-2'] })
+  await start($)
+  await spawn($, { resume: { agentId: 'agent-2' } })
+  await expand($)
+
+  expect((await only($, world)).via).toBe('unattributed')
+})
+
+test('a prompt ends the window of an agent that never acted, so it can\'t block the next skill', async ($, on) => {
+  const world = engine(on, {
+    spawnAgentIds: ['agent-2'],
+    during: { toolCall: e => (e.tool === 'Skill' ? expand($) : Promise.resolve()) },
+  })
+  await start($)
+  await spawn($)
+  await $.prompt.submit({ text: 'next, please', wait: false, origin: { kind: 'composer' } })
+  await $.tool.call({ tool: 'Skill', skill: 'notes' })
+
+  const capture = await only($, world)
+  expect(capture.loop).toEqual({ kind: 'main' })
+  expect(capture.via).toBe('skill-tool')
+})
+
+test('a typed command while an agent is starting stays unattributed, and the prompt then ends the window', async ($, on) => {
+  const world = engine(on, { spawnAgentIds: ['agent-2'], during: { promptSubmit: () => expand($) } })
+  await start($)
+  await spawn($)
+  await typed($, 'notes')
+  await expand($, 'after')
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.via)).toEqual(['unattributed', 'unattributed'])
+})
+
+test('a prompt forgets which agents have acted, so the list stays small', () => {
+  const tracker = new SkillTracker()
+  tracker.acted('agent-2')
+  tracker.promptEnded()
+  tracker.spawned('agent-2')
+
+  expect(tracker.attribute('notes')).toEqual({ loop: { kind: 'agent', agentId: 'agent-2' }, via: 'agent-preload' })
 })

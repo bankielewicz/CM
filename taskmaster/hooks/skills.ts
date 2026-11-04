@@ -71,6 +71,8 @@ export class SkillTracker {
   private typedCount = 0
   // Spawned agents that haven't acted yet: a preloaded skill loads in this window.
   private readonly starting = new Set<string>()
+  // Agents seen acting, in case that comes before their spawn's answer reaches the mod.
+  private readonly hasActed = new Set<string>()
 
   skillCallOpened(id: string, skill: string, agentId: string | undefined): void {
     this.skillCalls.set(id, { skill, loop: loopOf(agentId) })
@@ -93,12 +95,27 @@ export class SkillTracker {
 
   /** agent.spawn answered with this agent: it's starting. */
   spawned(agentId: string): void {
-    this.starting.add(agentId)
+    if (!this.hasActed.has(agentId)) this.starting.add(agentId)
   }
 
-  /** The agent made a tool call or ended its turn: it's no longer starting. Main (undefined) is ignored. */
+  /**
+   * The agent reached a point past any preload: its first model request, a tool
+   * call, its turn's end, or its stop. Main (undefined) is ignored.
+   */
   acted(agentId: string | undefined): void {
-    if (agentId) this.starting.delete(agentId)
+    if (!agentId) return
+    this.starting.delete(agentId)
+    this.hasActed.add(agentId)
+  }
+
+  /**
+   * A prompt has been submitted, by a person or as an agent's report. An agent
+   * still starting by now is one that closed no window, such as one killed first,
+   * so it can't go on blocking skills.
+   */
+  promptEnded(): void {
+    this.starting.clear()
+    this.hasActed.clear()
   }
 
   attribute(skill: string): Attribution {

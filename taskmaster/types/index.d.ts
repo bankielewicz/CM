@@ -36,6 +36,7 @@ export type WatchedEvent =
   | 'classic.PreCompact'
   | 'classic.SessionStart'
   | 'classic.Stop'
+  | 'classic.SubagentStop'
   | 'classic.TaskCompleted'
   | 'prompt.submit'
   | 'session.compact'
@@ -46,6 +47,7 @@ export type WatchedEvent =
   | 'tool.check'
   | 'turn.complete'
   | 'turn.start'
+  | 'turn.step'
 
 /**
  * What the self-check keeps in `$.store`, one record per Claude Code build:

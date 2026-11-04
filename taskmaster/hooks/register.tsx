@@ -61,6 +61,15 @@ export const register: Register = (on, options) => {
   on('classic.PostCompact', (_, e, next) => { seen('classic.PostCompact'); return next(e) })
   on('classic.Stop', (_, e, next) => { seen('classic.Stop'); return next(e) })
   on('classic.TaskCompleted', (_, e, next) => { seen('classic.TaskCompleted'); return next(e) })
+  on('classic.SubagentStop', (_, e, next) => { seen('classic.SubagentStop'); skills.acted(e.agent_id); return next(e) })
+  // A streaming event, so its hook must be an async generator. An agent's preloads
+  // are in place before its first model request, so that request ends its window.
+  // Not its turn.start, which fires before the preload (seen live on 2.1.318).
+  on('turn.step', async function* (_, e, next) {
+    seen('turn.step')
+    skills.acted(e.agentId)
+    return yield* next(e)
+  })
 
   // P1.1: what is open when a skill loads says which loop it belongs to.
   on('tool.call', { tool: 'Skill' }, async (_, e, next) => {
@@ -79,13 +88,17 @@ export const register: Register = (on, options) => {
       return await next(e)
     } finally {
       if (typed !== undefined) skills.typedClosed(typed)
+      skills.promptEnded()
     }
   })
 
   on('agent.spawn', async (_, e, next) => {
     seen('agent.spawn')
     const spawned = await next(e)
-    if (typeof spawned.agentId === 'string') skills.spawned(spawned.agentId)
+    // No preload window for these. A teammate in its own pane and a workflow's
+    // remote agent fire nothing here to close one, and preloads come before an
+    // agent's first turn, not on a resume.
+    if (typeof spawned.agentId === 'string' && !e.isTeammate && !e.workflow && !e.resume) skills.spawned(spawned.agentId)
     return spawned
   })
 

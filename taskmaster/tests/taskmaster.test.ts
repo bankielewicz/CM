@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 import { CHOICES, DEFAULTS, parseConfig } from '../hooks/config'
 import { WATCHED } from '../hooks/selfcheck'
 import type { Config, WatchedEvent } from '../types'
-import { BUILD, engine, SELF_CHECK_KEY, selfCheck, start, untilSaved, untilSeen } from './engine'
+import { BUILD, engine, SELF_CHECK_KEY, selfCheck, start, step, untilSaved, untilSeen } from './engine'
 
 // Plan F12's Phase 1 keys and defaults, written out here on their own, so a
 // default changed in plugin.json or DEFAULTS fails. A key retyped in plugin.json
@@ -39,6 +39,7 @@ const EVERY_EVENT: WatchedEvent[] = [
   'classic.PreCompact',
   'classic.SessionStart',
   'classic.Stop',
+  'classic.SubagentStop',
   'classic.TaskCompleted',
   'prompt.submit',
   'session.compact',
@@ -49,12 +50,14 @@ const EVERY_EVENT: WatchedEvent[] = [
   'tool.check',
   'turn.complete',
   'turn.start',
+  'turn.step',
 ]
 
 /** Raises every watched event after session.start, and returns what each call answered. */
 async function raiseEveryEvent($: Engine) {
   const prompt = await $.prompt.submit({ text: 'run the notes skill', wait: false, origin: { kind: 'composer' } })
   const turn = await $.turn.start({ text: 'run the notes skill', turnId: 'turn-1' })
+  const modelStep = await step($)
   const skill = await $.skill.prompt({ skill: 'notes', text: '1. Write the note.', frontmatter: {}, source: 'projectSettings' })
   const tool = await $.tool.call({ tool: 'Read', file_path: '/repo/a.txt' })
   const spawn = await $.agent.spawn({
@@ -68,6 +71,12 @@ async function raiseEveryEvent($: Engine) {
     fork: false,
   })
   const completed = await $.classic.TaskCompleted({ task_id: '1', task_subject: 'Write the note' })
+  const subagentStop = await $.classic.SubagentStop({
+    stop_hook_active: false,
+    agent_id: 'engine-agent',
+    agent_transcript_path: '/repo/agent.jsonl',
+    agent_type: 'general-purpose',
+  })
   const compact = await $.session.compact({ trigger: 'manual', messages: [] })
   await $.classic.PreCompact({ trigger: 'manual', custom_instructions: null })
   await $.classic.SessionStart({ source: 'compact' })
@@ -75,7 +84,7 @@ async function raiseEveryEvent($: Engine) {
   const stop = await $.classic.Stop({ stop_hook_active: false, last_assistant_message: 'done' })
   const done = await $.turn.complete({ answer: 'done', durationMs: 5, isAborted: false, turnId: 'turn-1', reason: 'answer' })
   const end = await $.session.end({ reason: 'other', sessionId: 'session-1', resume: { id: 'session-1' } })
-  return { prompt, turn, skill, tool, spawn, completed, compact, stop, done, end }
+  return { prompt, turn, modelStep, skill, tool, spawn, completed, subagentStop, compact, stop, done, end }
 }
 
 // ------------------------------------------------------------ self-check
@@ -174,7 +183,7 @@ test('a stored record this version cannot read is replaced, not merged', async (
 
 test('stored names that are not watched events are dropped', async ($, on) => {
   const world = engine(on, {
-    seed: { [SELF_CHECK_KEY]: { schema: 1, build: BUILD, seen: ['turn.step', 42, 'tool.call'], config: F12, updatedAt: 1 } },
+    seed: { [SELF_CHECK_KEY]: { schema: 1, build: BUILD, seen: ['turn.abort', 42, 'tool.call'], config: F12, updatedAt: 1 } },
   })
   await start($)
 
@@ -269,6 +278,9 @@ test('every watched event passes through unchanged, with the engine\'s own answe
   expect([...new Set(world.reached)].sort()).toEqual(EVERY_EVENT)
   expect(answers.prompt.text).toBe('engine: run the notes skill')
   expect(answers.turn.turnId).toBe('engine-turn')
+  expect(answers.modelStep.chunks).toEqual([{ kind: 'text', index: 0, text: 'engine chunk' }])
+  expect(answers.modelStep.answer.answer).toBe('engine step')
+  expect(answers.subagentStop.block).toBeUndefined()
   expect(answers.skill.text).toBe('engine skill text')
   expect(answers.tool.result).toEqual({ text: 'engine result' })
   expect(answers.tool.deny).toBeUndefined()
