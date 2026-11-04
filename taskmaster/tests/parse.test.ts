@@ -518,3 +518,7 @@ test('an indented list under a bullet is nested, not the top level', () => {
   expect(titles('- Setup\n  1. nested\n\nA paragraph.\n\n1. Real\n')).toEqual(['Real'])
   expect(titles('- Group\n  - [ ] nested\n')).toEqual([])
 })
+
+test("a heading's closing # sequence is stripped only when a space comes before it", () => {
+  expect(titles('## Step 1: Learn C#\n\n## Step 2: Use F# ##\n\n## Step 3: Done ###  \n')).toEqual(['Learn C#', 'Use F#', 'Done'])
+})

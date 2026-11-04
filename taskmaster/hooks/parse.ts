@@ -105,7 +105,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
 
 const ORDERED = /^(\s*)\d+[.)]\s+(.*)$/
 const CHECKLIST = /^(\s*)[-*+]\s+\[[ xX]\]\s+(.*)$/
-const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/
+const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/
 
 function title(raw: string): string {
   const plain = raw
