@@ -743,3 +743,24 @@ test('a spaced thematic break ends a list at its indent, and a deeper one stays 
   expect(titles('1. a\n* * *\n2. b\n')).toEqual(['a'])
   expect(titles('1. a\n   - - -\n2. b\n')).toEqual(['a', 'b'])
 })
+
+test('a blockquote is never lazy', () => {
+  expect(titles('1. First\n> Separate quote\n2. Different list\n')).toEqual(['First'])
+  expect(rulesIn('- a\n> quote\n\n    You MUST not see code.\n')).toEqual([])
+})
+
+test('an HTML block start of each kind that can interrupt a paragraph is never lazy', () => {
+  for (const start of ['<pre>', '<!-- c -->', '<?x?>', '<!DOCTYPE x>', '<![CDATA[x]]>', '<div>', '</div>', '<div/>', '<DIV class="x">', '<details', '<pre']) {
+    expect(rulesIn(`- a\n${start}\n\n    You MUST not see code.\n`)).toEqual([])
+  }
+})
+
+test('any other tag stays lazy, as does text that only looks like a block tag', () => {
+  for (const line of ['<kbd>x</kbd> lazy', '<divx>', '<prefix>', '</pre>', '<1>', '<', '<!1']) {
+    expect(titles(`1. a\n${line}\n2. b\n`)).toEqual(['a', 'b'])
+  }
+})
+
+test('a blockquote deeper than its list stays in the list', () => {
+  expect(rulesIn('- a\n  > deeper\n\n    You MUST x\n')).toEqual(['MUST'])
+})

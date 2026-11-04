@@ -117,15 +117,33 @@ const CHECKLIST = /^(\s*)[-*+]\s+\[[ xX]\]\s+(.*)$/
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/
 const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
 
+/** A blockquote, or an HTML block of CommonMark's types 2 to 5: comment, `<?`, declaration, CDATA. */
+const QUOTE_OR_MARKUP = /^ {0,3}(?:>|<(?:!--|\?|![A-Za-z]|!\[CDATA\[))/
+/** CommonMark's HTML block type 1, which has no closing form here: `</pre>` starts nothing. */
+const RAW_TAG = /^ {0,3}<(?:script|pre|style|textarea)(?:[ \t>]|$)/i
+const BLOCK_TAG = /^ {0,3}<\/?([A-Za-z][A-Za-z0-9-]*)(?:[ \t]|\/?>|$)/
+/** CommonMark 0.31.2's HTML blocks, type 6. Any other tag is type 7, which can't interrupt a paragraph. */
+const BLOCK_TAGS = new Set([
+  'address', 'article', 'aside', 'base', 'basefont', 'blockquote', 'body', 'caption', 'center', 'col', 'colgroup', 'dd', 'details', 'dialog', 'dir', 'div', 'dl', 'dt',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'frame', 'frameset', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hr', 'html', 'iframe', 'legend', 'li',
+  'link', 'main', 'menu', 'menuitem', 'meta', 'nav', 'noframes', 'ol', 'optgroup', 'option', 'p', 'param', 'search', 'section', 'summary', 'table', 'tbody', 'td', 'tfoot',
+  'th', 'thead', 'title', 'tr', 'track', 'ul',
+])
+
+/** Whether a line can interrupt a paragraph by starting a block of its own. Fences and list items are read before this. */
+function startsBlock(text: string): boolean {
+  return HEADING.test(text) || THEMATIC_BREAK.test(text) || QUOTE_OR_MARKUP.test(text) || RAW_TAG.test(text) || BLOCK_TAGS.has(BLOCK_TAG.exec(text)?.[1]?.toLowerCase() ?? '')
+}
+
 /**
  * Whether a line that isn't a list item ends a list at this indent. It has to sit
  * at that indent or further out. Text straight after other text is a lazy
- * continuation and belongs to the item, unless it's a heading or a thematic break.
+ * continuation and belongs to the item, unless it could start a block.
  */
 function endsList(line: Line, listIndent: number): boolean {
   const indent = line.text.search(/\S/)
   if (indent === -1 || indent > listIndent) return false
-  return !line.afterText || HEADING.test(line.text) || THEMATIC_BREAK.test(line.text)
+  return !line.afterText || startsBlock(line.text)
 }
 
 /** A paired run of backticks, of any length, around a code span. */
