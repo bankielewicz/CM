@@ -20,6 +20,8 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - `isReadOnly` read from the real call's `tool.check`,
   - a subagent's answer read from `turn.complete`.
 
+**`spike: <id>` citations** each name a Gate A check. The spike is deleted, so the check's definition is in `hooks/checks.ts` and `RUNBOOK.md` at [`d46b356`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike), and its result is in plan §10.1.
+
 **Owner decisions** (2026-11-03, on the proposals this list first made)
 1. **Resume without the Plan Gate (P1.15).** F8.6 has the Plan Gate make a resumed run reload the skill, rebuild its tasks and read `HANDOFF.md` before any write, and Phase 1 has no Plan Gate. So `/taskmaster resume` reloads the skill and rebuilds the tasks itself, and G3 holds the stop until `HANDOFF.md` has been read.
 2. **Legitimate waits (P1.10, P1.17).** Phase 1 recognises a wait from `taskmaster_await_user`, or from a trailing "?" on the last message (F5's fast pre-check). A stop that a trailing "?" lets through is listed in the summary below the answer, so a question can't hide a skipped step. The `$.model.classify` fallback arrives with Phase 2's question detection.
@@ -67,11 +69,11 @@ Report the commands with their output. `main` is protected, so each task (or a s
 
     So the bar is enforced only by the `mod-coverage` check, as before.
   - Checked in an interactive terminal (2026-11-03): loaded with `claude --debug --plugin-dir`, hot reloads and an exit worked, the debug logs show no failed hook, and the owner saw nothing from the mod.
-- [ ] P1.0b **Delete the spike** (owner decision 3). **Waiting on the owner: step 2.** Two PRs, in this order, and only after P1.0 is merged:
-  1. **Delete `spike/`. Done in PR #7.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`scripts/mod-coverage.mjs:331`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
+- [ ] P1.0b **Delete the spike** (owner decision 3). **Waiting on the owner: step 2.** Two PRs, in this order:
+  1. **Delete `spike/`. Done in PR #7.** A PR removes the folder and updates the paths in `CLAUDE.md` and `README.md`. The `coverage-exempt.json` entry stays for now. The gate looks up exemptions only for the mods it finds (`main()` in `scripts/mod-coverage.mjs`), so it ignores the leftover entry, and `taskmaster/` keeps it from failing with "no mods found". The Gate A record already lives in plan §10.1.
   2. **Remove the exemption entry.** A second PR deletes the `spike/taskmaster-spike` entry from `coverage-exempt.json`. That file is protected: Claude can't edit it (`.claude/settings.json`), and `gate-guard` fails the PR until the owner lifts that check in the ruleset for it. `main` takes no direct pushes, so this step is a PR too.
 
-  Don't reverse the order. Removing the entry while `spike/` exists fails `mod-coverage`, because the spike is at 61.58% (`scripts/mod-coverage.mjs:281`).
+  Step 2 waits for PR #7 to merge. Removing the entry while `spike/` exists fails `mod-coverage`, because the spike is at 61.58% (`printMod()` in `scripts/mod-coverage.mjs`).
 
 ## M1. Contract compiler (F1)
 - [ ] P1.1 **Capture and attribute** (F1.1). On `skill.prompt`, capture the skill, its text, frontmatter, source, plugin name, path and a content hash. Attribute it to a loop: through the `Skill` tool's `tool.call.agentId`, through `agent.spawn` for preloaded skills, or to the main loop for a typed `/name` (spike: `skill-attribution`). **Red:** one test per attribution path. *Depends on P1.0.*

@@ -517,7 +517,7 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 
 ## 9. Build order
 
-**Phase 0: spike (1–2 days). Built, then deleted after Gate A (P1.0b):** [`spike/taskmaster-spike/`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike) and its [runbook](https://github.com/bankielewicz/CM/blob/d46b356/spike/taskmaster-spike/RUNBOOK.md), kept in git history at `d46b356`. Observe-only: capture skills, record the ledger, log to the journal, with one-shot probes for the checks that need an action. **Confirm on your build:**
+**Phase 0: spike (1–2 days). Built, then deleted after Gate A (P1.0b):** [`spike/taskmaster-spike/`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike) and its [runbook](https://github.com/bankielewicz/CM/blob/d46b356/spike/taskmaster-spike/RUNBOOK.md), kept in git history at `d46b356`. Observe-only: capture skills, record the ledger, log to the journal, with one-shot probes for the checks that need an action. **Confirm on your build** (answered in §10.1):
 1. the order of `tool.check` and `tool.call`,
 2. that `$.tool.call(TaskCreate)` seeds tasks Claude actually sees,
 3. whether the built-in task list persists across sessions,
@@ -622,7 +622,7 @@ Write the thresholds down before the evaluation runs and don't move them during 
 
 - **Plain-answer subagents:** G4 blocks `classic.SubagentStop`, as designed.
 - **Hand-back subagents:** G4 denies the `SubagentHandback` call while that subagent's steps are open. It re-checks on every attempt and lets the call through with a `released: ...` note after `maxStopBlocks`, like G3 (F5). A refusal holds the subagent but doesn't guarantee it acts on the refusal (one of the two retried with the same report). So the cap is what prevents a loop, and the deny names the open step.
-- **Open:** bypass mode. Run `check-every-mode` and both subagent probes from a terminal session in bypass mode before the Plan Gate or G4 claim to cover it.
+- **Open:** bypass mode. Run `check-every-mode` and both subagent probes from a terminal session in bypass mode before the Plan Gate or G4 claim to cover it. The probes went with the spike, so run them from a checkout of `d46b356`.
 
 ### 10.2 Gate B: after the Phase 1.5 prototype trial (product value)
 
