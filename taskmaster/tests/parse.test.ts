@@ -775,3 +775,8 @@ test('a long trailing run of backslashes still continues the line only when odd'
   expect(commandsIn(shell(`echo ${'\\'.repeat(200000)}`, 'npm test'))).toEqual(['npm test'])
   expect(commandsIn(shell(`echo ${'\\'.repeat(200001)}`, 'npm test'))).toEqual([])
 })
+
+test('a literal NUL in a title cannot be mistaken for what stands in for a code span', () => {
+  expect(titles('1. \u00000\u0000 and `x`\n')).toEqual(['\u00000\u0000 and x'])
+  expect(titles('1. `a\u0000b` c\n')).toEqual(['a\u0000b c'])
+})

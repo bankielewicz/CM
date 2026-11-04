@@ -146,17 +146,21 @@ function endsList(line: Line, listIndent: number): boolean {
   return !line.afterText || startsBlock(line.text)
 }
 
-/** A paired run of backticks, of any length, around a code span. */
-const CODE_SPAN = /(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)/g
+/** What a title holds aside: a literal NUL, or a paired run of backticks, of any length, around a code span. */
+const HELD = /\0|(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)/g
 
-/** A title without its Markdown marks. Code spans are held aside first, so their contents stay literal. */
+/**
+ * A title without its Markdown marks. Code spans are held aside first, so their
+ * contents stay literal. So are literal NULs, so that every NUL left in the string
+ * marks something held, and text can't pass for it.
+ */
 function title(raw: string): string {
-  const spans: string[] = []
+  const held: string[] = []
   const plain = raw
-    .replace(CODE_SPAN, (_span, _run, code: string) => `\0${spans.push(code) - 1}\0`)
+    .replace(HELD, (match, _run, code: string | undefined) => `\0${held.push(code ?? match) - 1}\0`)
     .replace(/(\*\*|__)(.+?)\1/g, '$2')
     .replace(/(^|\W)[*_](.+?)[*_](?=\W|$)/g, '$1$2')
-    .replace(/\0(\d+)\0/g, (held, index: string) => spans[Number(index)] ?? held)
+    .replace(/\0(\d+)\0/g, (_mark, index: string) => held[Number(index)] as string)
     .trim()
   return plain.slice(0, TITLE_MAX)
 }
