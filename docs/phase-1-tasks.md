@@ -100,10 +100,10 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - **#7:** a failed capture writes one debug line, and shows nothing.
     - **#8:** the capture keeps no text. Stripping the `ARGUMENTS` block wouldn't be enough, because `$ARGUMENTS` puts the words in the body.
     - **#9:** the `hash` comment no longer calls it a cache key.
-    - **#10:** see "Before merging".
+    - **#10:** the owner ran the terminal check before this PR merged, recorded below.
     - **Found while fixing:** a forked skill got the caller's loop, confirmed live, so it stays unattributed. And `failStateWrites` never failed a write, so `failClock` replaces it.
     - **Limits:** an agent killed before any closing event stays a claim until the next prompt; a live attempt to test a kill didn't get that far. A rejecting `$.state.set` can't be tested in the kit, which answers beneath it. The self-check shows that `turn.step` fired, not when, so event order needs a live recheck after a Claude Code update, with `docs/probes/event-order.md`.
-  - **Before merging:** the owner runs the interactive-terminal check on this PR (owner's decision, 2026-11-04), and it's recorded here as for P1.0. P1.2 and P1.3 are treated the same.
+  - **Checked in an interactive terminal (2026-11-04, on 2.1.318):** loaded with `claude --debug-file <log> --plugin-dir`, the owner ran `/notes` and an agent with `notes` preloaded and saw nothing from the mod, and the debug log shows it loaded with no failed or skipped hook. P1.2 and P1.3 get the same check before their PRs merge (owner's decision, 2026-11-04).
 - [x] P1.2 **Deterministic parse** (F1.2). **Done: PR #9.** Name, description, and the `allowed-tools`, `context: fork` and `disable-model-invocation` frontmatter keys. Numbered or ordered lists, "Step N" headings, `- [ ]` checklists, MUST/NEVER/ALWAYS lines, and test, lint or build commands in code fences (candidate verify commands). **Red:** fixtures for a numbered workflow, a checklist skill, and a reference skill that yields no steps. *Depends on P1.1.*
   **Status (2026-11-04):**
   - `hooks/parse.ts`'s `parseSkill(text, frontmatter)` is pure. It isn't wired to a hook yet: P1.4 builds the contract from it.
