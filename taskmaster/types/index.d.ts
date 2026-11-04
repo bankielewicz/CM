@@ -94,7 +94,11 @@ export type SkillCapture = {
   source: string
   pluginName?: string
   path?: string
-  /** SHA-256 of `text`, as hex. With `path`, the key P1.4 caches an extraction under. */
+  /**
+   * SHA-256 of the text as `skill.prompt` gave it, as hex. It changes with the
+   * skill's folder and with every argument, so it isn't a cache key: P1.4 and
+   * P1.15 hash the body.
+   */
   hash: string
   loop: SkillLoop
   via: SkillVia
