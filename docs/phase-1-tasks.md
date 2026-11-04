@@ -78,7 +78,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
 ## M1. Contract compiler (F1)
 - [x] P1.1 **Capture and attribute** (F1.1). **Done: PR #8.** On `skill.prompt`, capture the skill, frontmatter, source, plugin name, path and a content hash. Attribute it to a loop: through the `Skill` tool's `tool.call.agentId`, through `agent.spawn` for preloaded skills, or to the main loop for a typed `/name` (spike: `skill-attribution`). **Red:** one test per attribution path. *Depends on P1.0.*
   **Status (2026-11-04):**
-  - `hooks/skills.ts` captures each skill into `$.state` (`taskmaster.skills`, the newest 20), with a SHA-256 of its text and its loop, saved after the hook answers. Not the text itself. 49 new tests, 29 of them from the review round below; coverage stays at 100% of lines and functions.
+  - `hooks/skills.ts` captures each skill into `$.state` (`taskmaster.skills`, the newest 20), with a SHA-256 of its text and its loop, saved after the hook answers, and started over at each `session.end`. Not the text itself. 55 new tests, 29 and 6 of them from the two review rounds below; coverage is 99.42% of lines (174 of 175) and 100% of functions. The uncovered line is the reset's failed-write log, listed under the second round's limits.
   - **Attribution, from orders seen live.** Each of these can claim a skill. One loop gets it, and two leave it `unattributed`:
     1. An open `Skill` call whose `skill` matches: `skill.prompt` fires inside the call.
     2. An open `prompt.submit` whose `command` matches: a typed `/name` expands inside `prompt.submit`'s `next(e)`, before the main `turn.start`.
@@ -99,7 +99,21 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - **#10:** the owner ran the terminal check before this PR merged, recorded below.
     - **Found while fixing:** a forked skill got the caller's loop, confirmed live, so it stays unattributed. And `failStateWrites` never failed a write, so `failClock` replaces it.
     - **Limits:** an agent killed before any closing event stays a claim until the next prompt; a live attempt to test a kill didn't get that far. A rejecting `$.state.set` can't be tested in the kit, which answers beneath it. The self-check shows that `turn.step` fired, not when, so event order needs a live recheck after a Claude Code update, with `docs/probes/event-order.md`.
-  - **Checked in an interactive terminal (2026-11-04, on 2.1.318):** loaded with `claude --debug-file <log> --plugin-dir`, the owner ran `/notes` and an agent with `notes` preloaded and saw nothing from the mod, and the debug log shows it loaded with no failed or skipped hook. P1.2 and P1.3 get the same check before their PRs merge (owner's decision, 2026-11-04).
+  - **Second review round** (PR #8, `/code-review` of `453f116`, the owner's decisions D1–D4 and the architect's review, 2026-11-04):
+    - **#1, fixed.** `register()` doesn't rerun on `/clear`, so the held list outlived the conversation, and the next save wrote it back. Live on 2.1.318: after `/notes`, `/clear`, `/forked`, `taskmaster.skills` held both. The `session.end` observer now queues a reset, on every reason: the held list becomes `[]`, never `undefined`, which would re-read a `$.state` that survived, and `$.state` gets an empty shaped value. P1.15's cold-start resume is unaffected, because it reloads the skill, which makes a fresh capture.
+    - **#2 (D2), kept.** `$` stays in the save closure, and CLAUDE.md's rule now says what the engine's own example shows. The probe's expected results include the capture landing.
+    - **#3, #4 (D3), left as they are.** Each needs an event in a window of about 50 ms, and the vote that leaves two claiming loops `unattributed` stays, as Codex's P2 asked. The report case is under the limits below, and claims expiring by age is recorded under P1.6.
+    - **#5, no change.** The queued save holds `e` only while a save is slow or hung, and `at` is documented as when it was recorded. Taking `$.clock.now()` early would add an unhandled rejection under a failing clock.
+    - **#6 (D4), kept.** `hash` stays, as F1.1 requires, with a guard under P1.12 and P1.18.
+    - **#7, no change.** Later hooks live inside `register()`, where `saves` is in scope, so `idle()` is reachable.
+    - **#8, no change.** `hasActed` is a few short strings per prompt, and deleting on stop would reopen the race it exists for.
+    - **#9, no change.** The `turn.step` wrapper is deliberate (plan §9), and the self-check watches that event anyway.
+    - **#10, no change.** The types require `frontmatter`, and P1.3's `fromFrontmatter` assumes it too.
+    - **Corrected:** plan §9 gave `origin: 'peer'`. It's `origin: { kind: 'peer' }`, and a background agent's report still showed `peer` when rechecked live.
+    - **Tests and mutation checks:** 6 new tests, and no existing test changed. All 9 mutants of the reset were caught: no reset, `captured = undefined` with an old `$.state` and a lost write, no held-list reset, no empty write, an unshaped write, `clear` only, not queued, a hook that waits on the queue, and a dropped `next`.
+    - **Limits:** a report arrives as `prompt.submit`, seen as `origin: { kind: 'peer' }`, and clears every starting agent's claim like any other prompt, so a preload in those few milliseconds goes `unattributed`. The reset's failed-write log line can't be tested, because the kit can't make `$.state.set` reject, and the order of `captured = []` and that write is what keeps a failed write from undoing the reset.
+    - **Checked live:** the [second check](probes/event-order.md#second-check-clear) in the probe runbook, before and after the fix, on 2.1.318.
+  - **Checked in an interactive terminal (2026-11-04, on 2.1.318):** loaded with `claude --debug-file <log> --plugin-dir`, the owner ran `/notes` and an agent with `notes` preloaded and saw nothing from the mod, and the debug log shows it loaded with no failed or skipped hook. P1.2 and P1.3 get the same check before their PRs merge (owner's decision, 2026-11-04). This check predates the second review round's fix, so the owner reruns it before #8 merges.
 - [ ] P1.2 **Deterministic parse** (F1.2). Name, description, and the `allowed-tools`, `context: fork` and `disable-model-invocation` frontmatter keys. Numbered or ordered lists, "Step N" headings, `- [ ]` checklists, MUST/NEVER/ALWAYS lines, and test, lint or build commands in code fences (candidate verify commands). **Red:** fixtures for a numbered workflow, a checklist skill, and a reference skill that yields no steps. *Depends on P1.1.*
 - [ ] P1.3 **Frontmatter and overrides** (F1.7, F1.9). Parse and schema-validate the `taskmaster:` block, and read `.taskmaster/overrides/<skill>.yaml`. Precedence is frontmatter, then override, then LLM, then heuristics (principle 1). **Red:** invalid frontmatter falls back with a logged reason, and an override beats extraction. *Depends on P1.2.*
 - [ ] P1.4 **Cached extraction and enforcement level** (F1.3, F1.4). One Haiku call returns JSON that is validated against a schema and cached in `$.store` by path + hash. If the call fails, the F1.2 result is used. The level is `enforce`, `advisory` or `none`: `none` for reference and persona skills and for `exemptSkills`. **Red:**
@@ -117,6 +131,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - The task map comes from `TaskCreate`, `TaskUpdate` and `TodoWrite` *results*.
   - Each step has a coverage state: `uncovered`, `pending`, `in progress`, `satisfied`, `waived` or `needs re-verify`.
   - Everything is kept in `$.state` and never rebuilt from `TaskList`.
+  - **Decide how long a starting agent's claim lasts first (owner's D3, PR #8).** This is the first task to hold a loop to a skill through `taskmaster.skills`, so attribution's limits start to matter here. The follow-up is claims that expire by age: stamp the spawn, ignore claims older than a few seconds (a preload came at most +52 ms after the spawn, a first tool call at least +2.8 s), and stop clearing `starting` on prompts. That retires both P1.1 limits on claims: the report that clears a claim, and the killed agent whose claim lingers. Use `$.clock`, which tests can control, and don't let a failing clock read throw out of attribution.
 
   **Red:** a scripted call sequence produces the expected coverage map, and the mod's own calls stay out of the ledger. *Depends on P1.5.*
 - [ ] P1.7 **The three tools** (F3). `taskmaster_waive`, `taskmaster_await_user` and `taskmaster_checkpoint`, each registered with `isDeferred: false`. At `strict`, a waiver needs the user's yes through `$.ui.ask`. **Red:** each tool updates the run state, and a strict-mode waiver without a yes is refused. *Depends on P1.6.*
@@ -146,6 +161,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - **Mirror:** a mirror and index in `$.store`.
   - **Redaction:** secrets are redacted before every write.
   - **Finding a run:** a run is found through `active.json`, never by session id. `/clear` changes the id, and a restart keeps it (plan §9).
+  - **Skill hashes:** a checkpoint identifies a skill by P1.4's body key, never by the capture's `hash`. That one covers a typed command's arguments, and checkpoints can be committed.
 
   **Red:** a checkpoint round-trips, a planted secret never reaches disk, and a shell `cd` doesn't move the writes. *Depends on P1.6.*
 - [ ] P1.13 **When to write, and git** (F8.3, F8.1).
@@ -196,7 +212,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
 ## M6. Metrics and experiments (F13.1–F13.4, plus F13.6 export)
 - [ ] P1.18 **Event log, run summary and export** (F13.1, F13.2, F13.6).
   - **Events:** schema-versioned, with the common fields (including `arm` and `contract_source`) and every listed event type.
-  - **Privacy:** commands are stored as the normalized program plus a hash of the arguments, paths are hashed, and everything is redacted.
+  - **Privacy:** commands are stored as the normalized program plus a hash of the arguments, paths are hashed, and everything is redacted. `skill_id`'s hash is P1.4's body key, never the capture's `hash`, which covers a typed command's arguments.
   - **`runs.jsonl`:** silent skips, effective and friction blocks, saves, overhead and outcome.
   - **Commands:** `/taskmaster metrics`, and `metrics export` (JSONL + CSV + a data dictionary).
 
