@@ -93,12 +93,13 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - **Rules** are uppercase whole-word `MUST`, `NEVER` or `ALWAYS` outside code.
   - **Verify candidates** come from shell code blocks, indented or not.
     - Each `&&`, `||` or `;` segment is matched separately, with leading `VAR=value` dropped and `\` continuations joined.
-    - Each records the step it sits under.
+    - Each records the step it sits under. A command repeated under another step is kept for that step too, so "run the tests again" keeps its own verify spec.
   - **The text frame:** the "Base directory" line, a typed command's `ARGUMENTS` block and a stray YAML block are skipped.
-  - **Tests:** 24 new. Coverage is 100% of lines and functions. Eight mutants each fail their own test: step-source order (both ways), lists ending at blank lines, fences only at column 0, heading ranges, nested items, the `ARGUMENTS` block, and `VAR=` prefixes.
+  - **Tests:** 25 new. Coverage is 100% of lines and functions. Eight mutants each fail their own test: step-source order (both ways), lists ending at blank lines, fences only at column 0, heading ranges, nested items, the `ARGUMENTS` block, and `VAR=` prefixes.
   - **Smoke test over 219 real skills on this machine** (bundled and plugin skills, in the real text form):
     - 206 give steps (152 from headings, 53 from a numbered list, 1 from a checklist), and 13 give none.
     - It found one bug, fixed test-first: an em dash after "Step N".
+  - **Not yet verified live:** the `ARGUMENTS` separator was seen once, after a body ending in a newline. Whether a body without a trailing newline still gets two blank lines before `ARGUMENTS` is unchecked. This frame-stripping and P1.4's cache key both rely on it.
     - Some reference skills' numbered lists of principles read as steps. That's expected: P1.4's model classification (`workflow`, `reference`, `persona`) and the agreement rule decide those.
     - None of those skills has a test, lint or build command in a shell block, so verify candidates are checked in the tests only.
 - [ ] P1.3 **Frontmatter and overrides** (F1.7, F1.9). **Waiting on the owner: how to read override files.** The mod API has no YAML parser (2.1.317's `claude-code.d.ts` mentions YAML only for frontmatter, which `skill.prompt` hands over already parsed), and a mod has no Node or npm packages. Options: vendor a small YAML parser (its whole source then falls under the 95% gate), keep overrides as JSON (`.taskmaster/overrides/<skill>.json`, changing F1.9), or read a strict YAML subset. The frontmatter half of this task needs no parser. Parse and schema-validate the `taskmaster:` block, and read `.taskmaster/overrides/<skill>.yaml`. Precedence is frontmatter, then override, then LLM, then heuristics (principle 1). **Red:** invalid frontmatter falls back with a logged reason, and an override beats extraction. *Depends on P1.2.*

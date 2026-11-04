@@ -303,3 +303,23 @@ test('a numbered list wins over a checklist', () => {
 test('a "Step N" heading may use an em dash or en dash before its title', () => {
   expect(titles('## Step 1 — Is payroll covered?\n\n## Step 2 – Stage the run\n')).toEqual(['Is payroll covered?', 'Stage the run'])
 })
+
+test('the same command under two steps is a candidate for each step', () => {
+  const body = `1. Write a failing test.
+
+   \`\`\`bash
+   npm test
+   \`\`\`
+
+2. Implement it.
+3. Run the tests again.
+
+   \`\`\`bash
+   npm test
+   \`\`\`
+`
+  expect(parseSkill(skill(body), {}).verifyCandidates.map(c => [c.command, c.step])).toEqual([
+    ['npm test', 'S1'],
+    ['npm test', 'S3'],
+  ])
+})
