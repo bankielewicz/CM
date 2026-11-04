@@ -125,7 +125,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - Each `&&`, `||` or `;` segment is matched separately, with leading `VAR=value` dropped and `\` continuations joined.
     - Each records the step it sits under. A command repeated under another step is kept for that step too, so "run the tests again" keeps its own verify spec.
   - **The text frame:** the "Base directory" line, a typed command's `ARGUMENTS` block and a stray YAML block are skipped.
-  - **Tests:** 25 new. Coverage is 100% of lines and functions. Eight mutants each fail their own test: step-source order (both ways), lists ending at blank lines, fences only at column 0, heading ranges, nested items, the `ARGUMENTS` block, and `VAR=` prefixes.
+  - **Tests:** 25 new. `hooks/parse.ts` has 100% coverage of lines and functions. Eight mutants each fail their own test: step-source order (both ways), lists ending at blank lines, fences only at column 0, heading ranges, nested items, the `ARGUMENTS` block, and `VAR=` prefixes.
   - **Smoke test over 219 real skills on this machine** (bundled and plugin skills, in the real text form):
     - 206 give steps (152 from headings, 53 from a numbered list, 1 from a checklist), and 13 give none.
     - It found one bug, fixed test-first: an em dash after "Step N".
