@@ -750,13 +750,13 @@ test('a blockquote is never lazy', () => {
 })
 
 test('an HTML block start of each kind that can interrupt a paragraph is never lazy', () => {
-  for (const start of ['<pre>', '<!-- c -->', '<?x?>', '<!DOCTYPE x>', '<![CDATA[x]]>', '<div>', '</div>', '<div/>', '<DIV class="x">', '<details', '<pre']) {
+  for (const start of ['<pre>', '<PRE>', '<script>', '<style x>', '<textarea\tx>', '<pre', '<!-- c -->', '<?x?>', '<!DOCTYPE x>', '<![CDATA[x]]>', '<div>', '</div>', '<div/>', '<DIV class="x">', '<div\tx>', '<details']) {
     expect(rulesIn(`- a\n${start}\n\n    You MUST not see code.\n`)).toEqual([])
   }
 })
 
 test('any other tag stays lazy, as does text that only looks like a block tag', () => {
-  for (const line of ['<kbd>x</kbd> lazy', '<divx>', '<prefix>', '</pre>', '<1>', '<', '<!1']) {
+  for (const line of ['<kbd>x</kbd> lazy', '<divx>', '<div.x>', '<prefix>', '<pre.x>', '</pre>', '<1>', '<', '<!1']) {
     expect(titles(`1. a\n${line}\n2. b\n`)).toEqual(['a', 'b'])
   }
 })
