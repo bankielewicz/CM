@@ -136,7 +136,7 @@ npm run coverage
 
 It prints `PASS`, `FAIL` or `EXEMPT` for each mod with its line and function coverage, and exits 1 if any mod fails.
 
-A mod listed in [`coverage-exempt.json`](coverage-exempt.json) is excused from the percentage, but its tests must still pass. No mod is exempt now. The spike's entry stays until the owner removes it, and the gate ignores it, because the spike is gone. `taskmaster` is at 100% of its lines and functions.
+A mod listed in [`coverage-exempt.json`](coverage-exempt.json) is excused from the percentage, but its tests must still pass. No mod is exempt now. The spike's entry stays until the owner removes it, and the gate ignores it, because the spike is gone.
 
 The `mod-coverage` check runs from the pull request's own files, so a separate `gate-guard` check fails any pull request that changes the gate's own files: `coverage-exempt.json`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `.npmrc`, `scripts/`, `.github/workflows/` and Claude Code's project settings. It runs from the base branch, so a pull request can't change it for itself. To change the gate on purpose, the repository owner lifts that check in the ruleset for the merge.
 

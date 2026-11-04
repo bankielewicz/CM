@@ -22,6 +22,14 @@ export type World = {
   onWrite: (() => void)[]
   /** The latest value the mod wrote under each `$.state` key, as `plugin/key`. */
   state: Map<string, unknown>
+  /** Every `$.ui.log` line, with where it was sent. */
+  logs: { text: string; to: string }[]
+  /** True once `holdFirstStateWrite` is holding a write. */
+  stateHeld: boolean
+  /** Lets the first `$.state` write finish, when `holdFirstStateWrite` held it. */
+  releaseState: () => void
+  /** Called after each `$.state` write and each `$.ui.log` line. */
+  onChange: (() => void)[]
 }
 
 export type EngineOptions = {
@@ -57,8 +65,18 @@ export type EngineOptions = {
   }
   /** The agent id each `agent.spawn` answers with, in turn; `null` denies that spawn. */
   spawnAgentIds?: (string | null)[]
-  /** Every `$.state` write fails. */
-  failStateWrites?: boolean
+  /** Every `$.state` write waits forever, as a hung engine would. */
+  hangStateWrites?: boolean
+  /** The first `$.state` write waits until `world.releaseState()`. */
+  holdFirstStateWrite?: boolean
+  /**
+   * `$.clock.now()` fails, which makes a capture fail. A `$.state` write can't be
+   * made to fail here: beneath `$.state` the kit answers, so a hook that throws is
+   * skipped and the write goes on, and a `{ deny }` fails the test itself.
+   */
+  failClock?: boolean
+  /** What `$.state` holds at the start, by `plugin/key`, as a reload would leave it. */
+  seedState?: Record<string, unknown>
 }
 
 // Nothing sits beneath the plugin in a test: these hooks stand for the
@@ -72,6 +90,11 @@ export function engine(on: On, options: EngineOptions = {}): World {
   const released = new Promise<void>(resolve => {
     release = resolve
   })
+  let heldState = options.holdFirstStateWrite ?? false
+  let releaseState: () => void = () => {}
+  const stateReleased = new Promise<void>(resolve => {
+    releaseState = resolve
+  })
   const world: World = {
     saved: new Map(Object.entries(options.seed ?? {})),
     writes: [],
@@ -80,12 +103,25 @@ export function engine(on: On, options: EngineOptions = {}): World {
     release: () => release(),
     onWrite: [],
     state: new Map(),
+    logs: [],
+    stateHeld: false,
+    releaseState: () => releaseState(),
+    onChange: [],
   }
   const reach = (event: WatchedEvent): void => {
     world.reached.push(event)
   }
+  const changed = (): void => {
+    for (const listener of world.onChange.splice(0)) listener()
+  }
 
-  mock.clock(on, { now: 1_000 })
+  if (options.failClock) {
+    on('clock.now', () => {
+      throw new Error('clock unavailable')
+    })
+  } else {
+    mock.clock(on, { now: 1_000 })
+  }
   on('session.version', async () => {
     if (options.hangVersion) await new Promise<never>(() => {})
     if (options.versionFails) throw new Error('version unavailable')
@@ -120,6 +156,14 @@ export function engine(on: On, options: EngineOptions = {}): World {
   })
   on('ui.status', (_, e) => {
     world.shown.push(`status: ${String(e.text)}`)
+    return { value: undefined }
+  })
+  on('ui.log', (_, e) => {
+    const to = e.to ?? 'transcript'
+    world.logs.push({ text: e.text, to })
+    // A line in the transcript is something the person sees.
+    if (to !== 'debug') world.shown.push(`log: ${e.text}`)
+    changed()
     return { value: undefined }
   })
   on('ui.toast', () => {
@@ -176,10 +220,23 @@ export function engine(on: On, options: EngineOptions = {}): World {
     return { model: 'haiku', agentId }
   })
   // A test's `$` has no state noun, so the mod's state is read from its writes.
-  on('state.set', (_, e, next) => {
-    if (options.failStateWrites) throw new Error('state unavailable')
+  on('state.set', async (_, e, next) => {
+    if (options.hangStateWrites) await new Promise<never>(() => {})
+    if (heldState) {
+      heldState = false
+      world.stateHeld = true
+      changed()
+      await stateReleased
+    }
     world.state.set(`${e.plugin}/${e.key}`, e.value)
+    changed()
     return next(e)
+  })
+  on('state.get', (_, e, next) => {
+    const seeded = options.seedState?.[`${e.plugin}/${e.key}`]
+    // Only until the mod writes, as a value that a reload kept.
+    if (seeded === undefined || world.state.has(`${e.plugin}/${e.key}`)) return next(e)
+    return { value: { value: seeded, version: 0 } } as never
   })
   on('classic.SessionStart', () => {
     reach('classic.SessionStart')
@@ -201,11 +258,32 @@ export function engine(on: On, options: EngineOptions = {}): World {
     reach('classic.TaskCompleted')
     return {}
   })
+  on('classic.SubagentStop', () => {
+    reach('classic.SubagentStop')
+    return {}
+  })
+  on('turn.step', async function* (_, e) {
+    reach('turn.step')
+    yield { kind: 'text', index: 0, text: 'engine chunk' }
+    return { turnId: e.turnId, index: e.index, answer: 'engine step', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
   return world
 }
 
 export async function start($: Engine): Promise<void> {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+}
+
+/** A model request, in the loop `agentId` names, read to its end. Gives the chunks and what the step answered. */
+export async function step($: Engine, agentId?: string) {
+  const stream = $.turn.step({ turnId: 'turn-1', index: 0, model: 'claude-test', messageCount: 1, ...(agentId ? { agentId } : {}) })
+  const chunks: unknown[] = []
+  let read = await stream.next()
+  while (!read.done) {
+    chunks.push(read.value)
+    read = await stream.next()
+  }
+  return { chunks, answer: read.value }
 }
 
 /** The self-check record now in the store, if any. */
@@ -235,6 +313,21 @@ export function untilSaved(
 /** Waits until the saved record lists every one of `events`. */
 export function untilSeen(world: World, ...events: WatchedEvent[]): Promise<SelfCheckRecord> {
   return untilSaved(world, record => events.every(event => record.seen.includes(event)))
+}
+
+/**
+ * Waits until `test` passes. A capture and its log line come after the hook has
+ * answered, so a test waits for them here. It's checked after each `$.state`
+ * write and each `$.ui.log` line.
+ */
+export function until(world: World, test: () => boolean): Promise<void> {
+  return new Promise(resolve => {
+    const check = (): void => {
+      if (test()) resolve()
+      else world.onChange.push(check)
+    }
+    check()
+  })
 }
 
 /**

@@ -27,7 +27,7 @@ The task list improves (a) and (b) only when four things hold:
 | --- | --- | --- |
 | Know a skill was loaded: full text, frontmatter, path, plugin | `skill.prompt` (fires for `/name`, the Skill tool, and skills preloaded into a subagent). **It carries no `agentId`**, so the loop is taken from the `Skill` tool's `tool.call` (which has one), from `agent.spawn` for preloaded skills, and a typed `/name` means the main loop | Hard |
 | Add the contract to what Claude reads | rewrite `text` in `skill.prompt`. This happens before the row is sent, so the prompt cache stays intact | Hard (delivery) |
-| Seed the task list from the contract | `$.tool.call({ tool: 'TaskCreate', ... })` | Hard (needs a spike to confirm Claude sees the seeded tasks) |
+| Seed the task list from the contract | `$.tool.call({ tool: 'TaskCreate', ... })` | Hard (Gate A confirmed Claude sees the seeded tasks, §10.1) |
 | Block or rewrite a tool call | `tool.call` → `{ deny }` | Hard |
 | Tell reads from writes | `tool.check` input `isReadOnly` (the engine's classification; absent means treat it as a write) | Hard |
 | Observe tasks | `tool.call` on `TaskCreate` / `TaskUpdate` / `TodoWrite`. **`TaskGet` and `TaskList` don't return `metadata`, and `TaskList` omits `description`**, so the mod keeps its own ledger | Hard |
@@ -97,7 +97,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
 ## 5. Features and functionality (the build list)
 
 ### F1. Contract Compiler: skill → contract (universal)
-- **F1.1 Capture** `skill`, `text`, `frontmatter`, `source`, `pluginName`, `path`, and a content hash. Attribute the skill to a loop: the `Skill` tool's `tool.call.agentId`, `agent.spawn` for preloaded skills, or the main loop for a typed `/name`.
+- **F1.1 Capture** `skill`, `frontmatter`, `source`, `pluginName`, `path`, and a content hash. Not `text`, which can hold the words of a typed command: a hook has it as `e.text`, and later readers take the file at `path` or P1.4's cache. Attribute the skill to a loop: the `Skill` tool's `tool.call.agentId`, `agent.spawn` for preloaded skills, or the main loop for a typed `/name`. When two loops could claim it, or it's a forked skill (`context: fork`), it stays unattributed.
 - **F1.2 Deterministic parse (no LLM):** name, description, and frontmatter (`allowed-tools`, `context: fork`, `disable-model-invocation`); numbered or ordered lists, "Step N" headings, `- [ ]` checklists; MUST/NEVER/ALWAYS lines; shell commands in code fences that look like test, lint, or build (these become candidate `verify` commands).
 - **F1.3 One cheap model call (Haiku, cached):** classify the skill as `workflow`, `reference`, or `persona`; produce step ids and titles, required versus optional, user-confirmation points, candidate verify commands, and a **confidence** score. The output is JSON, validated against a schema, and cached in `$.store` by `path + hash`, so each skill version is extracted once. If the call fails, use the F1.2 result.
 - **F1.4 Enforcement level of the contract:**
@@ -105,7 +105,7 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
   - `advisory`: anything else (Claude is reminded, gates warn instead of deny),
   - `none`: `reference` and `persona` skills, and anything in `exemptSkills`.
 - **F1.5 Protocol footer**, about 10 lines appended to the skill text: the step ids (namespaced `skill:S#`), "tag each task `[S#]`", "one task in progress at a time", "call `taskmaster_waive` to skip a step, with a reason", "call `taskmaster_await_user` when you need the user's input", and "call `taskmaster_checkpoint` at milestones". The skill's own text stays primary and is never replaced.
-- **F1.6 Seed the tasks** from the contract with `$.tool.call(TaskCreate)`, once the spike confirms Claude sees them. Otherwise the footer tells Claude to create them, and the Plan Gate enforces it.
+- **F1.6 Seed the tasks** from the contract with `$.tool.call(TaskCreate)`. Gate A confirmed Claude sees them (§10.1), so the fallback (the footer tells Claude to create them, and the Plan Gate enforces it) wasn't needed.
 - **F1.7 Opt-in frontmatter** for skill authors (optional; never required):
   ```yaml
   taskmaster:
@@ -517,7 +517,7 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 
 ## 9. Build order
 
-**Phase 0: spike (1–2 days). Built, then deleted after Gate A (P1.0b):** [`spike/taskmaster-spike/`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike) and its [runbook](https://github.com/bankielewicz/CM/blob/d46b356/spike/taskmaster-spike/RUNBOOK.md), kept in git history at `d46b356`. Observe-only: capture skills, record the ledger, log to the journal, with one-shot probes for the checks that need an action. **Confirm on your build:**
+**Phase 0: spike (1–2 days). Built, then deleted after Gate A (P1.0b):** [`spike/taskmaster-spike/`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike) and its [runbook](https://github.com/bankielewicz/CM/blob/d46b356/spike/taskmaster-spike/RUNBOOK.md), kept in git history at `d46b356`. Observe-only: capture skills, record the ledger, log to the journal, with one-shot probes for the checks that need an action. **Confirm on your build** (answered in §10.1):
 1. the order of `tool.check` and `tool.call`,
 2. that `$.tool.call(TaskCreate)` seeds tasks Claude actually sees,
 3. whether the built-in task list persists across sessions,
@@ -531,10 +531,10 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
 **Learned while building the spike** (these constrain how the real mod is written):
 - **`$` can't be passed around.** The validator refuses a module that passes, binds, or stores the engine handle; every call must be spelled `$.noun.method(...)` where it's made. The real mod therefore builds one table of engine calls (write, read, tool call, process run, state update) in `session.start`, each a closure spelled that way, and the gates, ledger, and checkpointer use that table. Hooks that fire before `session.start` buffer their data.
 - **State references need literals.** `atom({ plugin, key })` must name the plugin and key as string literals, not constants.
-- **Relative `$.fs` paths follow the session's *current* working directory, and a shell `cd` moves it** (seen live: one `cd` sent a journal write to `.taskmaster/spike/.taskmaster/spike/`). `$.session.root()` is not moved by a shell `cd`, so the real mod anchors every `.taskmaster/` path to it, and so does the spike now. Under `claude plugin test`, the working directory is the plugin folder.
+- **Relative `$.fs` paths follow the session's *current* working directory, and a shell `cd` moves it** (seen live: one `cd` sent a journal write to `.taskmaster/spike/.taskmaster/spike/`). `$.session.root()` is not moved by a shell `cd`, so the real mod anchors every `.taskmaster/` path to it. Under `claude plugin test`, the working directory is the plugin folder.
 - **`git commit --only` needs a prior `git add`** for new files (see F8.1).
 - **A mod's own `tool.check` hook isn't run on its own `$.tool.check` query** (observed live in the loaded spike). So the Plan Gate can't ask "is this read-only?" from inside `tool.call`. Instead it decides in the real call's `tool.check`, which runs inside `tool.call` and carries `isReadOnly`, answering `{ decision: 'deny' }` there. Real calls do carry it: on 2.1.317, read-only Bash commands (`cat`, `grep`, `ls`) arrived with `isReadOnly`, and `python3 -c` didn't. The spike's `check-every-mode` check found a `tool.check` on every main-loop model call in auto (90/90), plan (59/59) and default (28/28) modes. Bypass is untested, because cloud sessions don't offer it (RUNBOOK §5). The one call without a check was refused by the engine before the permission step (`ExitPlanMode` outside plan mode), so it didn't run either.
-- **The validator lists every "gating hook without .catch"** (tool.call, Stop, compaction, ...). An observer that throws is skipped, which fails open. That suits the spike and the real mod's Stop gate; only the `TaskUpdate` gate gets a `.catch`.
+- **The validator lists every "gating hook without .catch"** (tool.call, Stop, compaction, ...). An observer that throws is skipped, which fails open. That suits the real mod's Stop gate; only the `TaskUpdate` gate gets a `.catch`.
 - **`session.compact` wraps a compaction** (seen live on 2.1.317). It starts before `classic.PreCompact`, and its `next()` returns after `classic.PostCompact`. In between come the summarizer's SubagentStop and then `SessionStart(compact)`, which fires *before* PostCompact. So the checkpointer writes at PreCompact (or before session.compact's `next()`), and the resume briefing can be built at `SessionStart(compact)`.
 - **The engine's own helper agents raise SubagentStop.** On 2.1.317, 30 of 32 SubagentStop events came from agents with an empty `agent_type` that no Agent call started (the compaction summarizer and small helpers that run around each prompt). G4 must gate only agents whose `agentId` it saw from `agent.spawn`. Otherwise it would block those helpers, including the compaction summarizer.
 - **A subagent's answer comes from `turn.complete`, not SubagentStop.** When a spawned agent reports through `SubagentHandback` (auto mode), its SubagentStop has an empty `last_assistant_message`. When it ends with a plain answer (plan and default modes), SubagentStop carries the text. After a block, the agent's next SubagentStop fires before its `turn.complete`, and in both cases `turn.complete` carries the whole report as `answer`, with `agentId`. G4's question detection and any check of a subagent's answer read it there.
@@ -549,6 +549,14 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
   - A **`Skill` tool call** expands while the call is open.
   - A skill **preloaded into a subagent** expands after `agent.spawn` has answered with the agent's id, before that agent's first tool call. It doesn't expand while the spawn is open.
   - So the loop comes from what is open when `skill.prompt` fires (P1.1's rules in `docs/phase-1-tasks.md`).
+- **Learned reviewing P1.1** (seen live on 2.1.318, headless, with a probe mod):
+  - **A preload's full order, the same in 7 runs**, times from `agent.spawn` answering: the agent's `turn.start` (1–3 ms before), `classic.SubagentStart`, `skill.prompt` (+10–52 ms), its first `turn.step` (+20–51 ms), its first tool call (+2.8–9.5 s). So `turn.start` can't end a preload window, and the first `turn.step` can. `turn.step` fires as the engine is about to send a request, and a preload has to be in place before the first one.
+  - **The self-check can't see a reordering.** It lists which events fired, and kit tests raise events in the order a test writes them. A build that sent the first request before the preload would leave preloads unattributed and unenforced while the record looks healthy. So recheck this order live after a Claude Code update.
+  - **The engine waits for `skill.prompt`'s hooks.** Holding one for 400 ms moved the agent's first `turn.step` from about +20 ms to +435 ms. A hook's own time has a budget, with `$.clock.sleep` counting and an in-flight `$` call or `next` not: `turn.step hook skipped: ran past its 10s budget`, at which point what's beneath it runs.
+  - **`$.state` didn't behave as "one moment" in any hook dispatch.** The docs say every `get` of one dispatch reads one moment, whatever is written meanwhile. In practice a dispatch saw its own write, and a still-open one saw another dispatch's. Six overlapping `update` calls all landed, and an `update` on a finished dispatch's `$` landed at once. The mod still avoids depending on this: it's the only writer of its captures, so it holds the list and writes it with a plain `$.state.set`. A plain set writes what it's given, so a shaped value is written as `{ shape, value }`, and `read` unwraps it and declines another shape. All of that worked from a closure after the hook answered.
+  - **A typed command's arguments:** without `$ARGUMENTS` they're appended as `ARGUMENTS: <args>`. With it, they're substituted into the body and there's no suffix.
+  - **A forked skill (`context: fork`)** runs in a loop of its own, type `general-purpose`, with no `agent.spawn`. Through the `Skill` tool, `skill.prompt` fires inside the caller's open call, and the skill's tool calls carry the new loop's id. Typed, `skill.prompt` fires with no `prompt.submit` before it.
+  - **`prompt.submit` isn't only a person's prompt.** It also fires with `origin: 'peer'` when an agent's report is delivered.
 - **Learned in P1.0.**
   - A hook passed to `on` must be a function literal, or a function's name. A call that returns a hook doesn't load.
   - A `userConfig` number with `min` or `max` makes the engine refuse to load the module when a stored value is outside them. So one typo in settings switches the mod off. The real mod declares no `min`/`max`, and clamps in `parseConfig`. A string outside its `options` arrives as unset, so the `/config` picker stays.
@@ -631,7 +639,7 @@ Write the thresholds down before the evaluation runs and don't move them during 
 
 - **Plain-answer subagents:** G4 blocks `classic.SubagentStop`, as designed.
 - **Hand-back subagents:** G4 denies the `SubagentHandback` call while that subagent's steps are open. It re-checks on every attempt and lets the call through with a `released: ...` note after `maxStopBlocks`, like G3 (F5). A refusal holds the subagent but doesn't guarantee it acts on the refusal (one of the two retried with the same report). So the cap is what prevents a loop, and the deny names the open step.
-- **Open:** bypass mode. Run `check-every-mode` and both subagent probes from a terminal session in bypass mode before the Plan Gate or G4 claim to cover it.
+- **Open:** bypass mode. Run `check-every-mode` and both subagent probes from a terminal session in bypass mode before the Plan Gate or G4 claim to cover it. The probes went with the spike, so run them from a checkout of `d46b356`.
 
 ### 10.2 Gate B: after the Phase 1.5 prototype trial (product value)
 

@@ -1,14 +1,21 @@
 // P1.1: capture each skill as it loads, and work out which loop it belongs to
 // (plan F1.1). skill.prompt carries no agentId, so the loop comes from what is
-// open when it fires. These orders were seen live on 2.1.317:
+// open when it fires. These orders were seen live (plan §9):
 // - a Skill tool call: skill.prompt fires while the call is open, in the loop
 //   that made the call (main, or the subagent named by its agentId);
 // - a typed /name: skill.prompt fires inside prompt.submit, before the main
 //   turn starts, and prompt.submit carries the command's name;
-// - a skill preloaded into a subagent: skill.prompt fires after agent.spawn
-//   has answered with the new agent's id, before that agent's first tool call.
-// When none of these fits, or two loops could claim the skill, it stays
+// - a skill preloaded into a subagent: skill.prompt fires just after agent.spawn
+//   has answered with the new agent's id, before that agent's first model request.
+// Each of these can claim a skill. When none does, or two loops do, it stays
 // unattributed: a wrong loop would hold the wrong agent to its steps.
+//
+// Known limit: no event names the skills an agent preloads, so a starting agent
+// claims any skill. One that loads in those few milliseconds with no other claim
+// goes to that agent.
+//
+// A forked skill (`context: fork`) runs in a loop of its own, with no agent.spawn,
+// so whatever is open names the wrong loop. It's left unattributed.
 
 import type { SkillCapture, SkillLoop, SkillVia } from '../types'
 
@@ -32,10 +39,34 @@ export function keepLatest(list: readonly SkillCapture[], capture: SkillCapture)
   return [...list, capture].slice(-MAX_SKILLS)
 }
 
+/** The tag on what `$.state` keeps. A reload whose code names another tag reads the value as absent. */
+export const SKILLS_SHAPE = 'skills-2'
+
+/**
+ * Runs saves one at a time, in the order added, so captures land newest last and
+ * no hook waits on one. One that fails never stops the next. A hung save stops
+ * the later ones for this module instance, as a hung store does for the self-check.
+ */
+export class SaveQueue {
+  private last: Promise<unknown> = Promise.resolve()
+
+  add(save: () => Promise<void>): void {
+    this.last = this.last.then(save).catch(() => undefined)
+  }
+
+  /** Settles once everything added so far has finished. A later task waits on this rather than racing the saves. */
+  idle(): Promise<void> {
+    return this.last.then(() => undefined)
+  }
+}
+
+/** What went wrong, for a debug line. */
+export const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
 export type Attribution = { loop: SkillLoop; via: SkillVia }
 
 const MAIN: SkillLoop = { kind: 'main' }
-const UNATTRIBUTED: Attribution = { loop: { kind: 'unknown' }, via: 'unattributed' }
+export const UNATTRIBUTED: Attribution = { loop: { kind: 'unknown' }, via: 'unattributed' }
 
 const loopOf = (agentId: string | undefined): SkillLoop => (agentId ? { kind: 'agent', agentId } : MAIN)
 const loopKey = (loop: SkillLoop): string => (loop.kind === 'agent' ? `agent:${loop.agentId}` : loop.kind)
@@ -47,6 +78,8 @@ export class SkillTracker {
   private typedCount = 0
   // Spawned agents that haven't acted yet: a preloaded skill loads in this window.
   private readonly starting = new Set<string>()
+  // Agents seen acting, in case that comes before their spawn's answer reaches the mod.
+  private readonly hasActed = new Set<string>()
 
   skillCallOpened(id: string, skill: string, agentId: string | undefined): void {
     this.skillCalls.set(id, { skill, loop: loopOf(agentId) })
@@ -69,25 +102,41 @@ export class SkillTracker {
 
   /** agent.spawn answered with this agent: it's starting. */
   spawned(agentId: string): void {
-    this.starting.add(agentId)
+    if (!this.hasActed.has(agentId)) this.starting.add(agentId)
   }
 
-  /** The agent made a tool call or ended its turn: it's no longer starting. Main (undefined) is ignored. */
+  /**
+   * The agent reached a point past any preload: its first model request, a tool
+   * call, its turn's end, or its stop. Main (undefined) is ignored.
+   */
   acted(agentId: string | undefined): void {
-    if (agentId) this.starting.delete(agentId)
+    if (!agentId) return
+    this.starting.delete(agentId)
+    this.hasActed.add(agentId)
+  }
+
+  /**
+   * A prompt has been submitted, by a person or as an agent's report. An agent
+   * still starting by now is one that closed no window, such as one killed first,
+   * so it can't go on blocking skills.
+   */
+  promptEnded(): void {
+    this.starting.clear()
+    this.hasActed.clear()
   }
 
   attribute(skill: string): Attribution {
-    const calls = [...this.skillCalls.values()].filter(call => sameSkill(call.skill, skill))
-    if (calls.length > 0) {
-      const loops = new Set(calls.map(call => loopKey(call.loop)))
-      return loops.size === 1 && calls[0] ? { loop: calls[0].loop, via: 'skill-tool' } : UNATTRIBUTED
-    }
-    if ([...this.typed.values()].some(name => sameSkill(name, skill))) return { loop: MAIN, via: 'typed' }
-    if (this.starting.size === 1) {
-      const [agentId] = this.starting
-      if (agentId) return { loop: { kind: 'agent', agentId }, via: 'agent-preload' }
-    }
-    return UNATTRIBUTED
+    const claims: Attribution[] = [
+      ...[...this.skillCalls.values()]
+        .filter(call => sameSkill(call.skill, skill))
+        .map((call): Attribution => ({ loop: call.loop, via: 'skill-tool' })),
+      ...[...this.typed.values()]
+        .filter(name => sameSkill(name, skill))
+        .map((): Attribution => ({ loop: MAIN, via: 'typed' })),
+      // Any starting agent could be preloading it: no event names an agent's preloads.
+      ...[...this.starting].map((agentId): Attribution => ({ loop: { kind: 'agent', agentId }, via: 'agent-preload' })),
+    ]
+    const loops = new Set(claims.map(claim => loopKey(claim.loop)))
+    return loops.size === 1 && claims[0] ? claims[0] : UNATTRIBUTED
   }
 }
