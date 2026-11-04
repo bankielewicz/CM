@@ -497,3 +497,24 @@ test('the string form of allowed-tools splits on commas and spaces only outside 
   expect(tools('Bash(a (b, c) d:*) Read')).toEqual(['Bash(a (b, c) d:*)', 'Read'])
   expect(tools('Read) Bash(x y)')).toEqual(['Read)', 'Bash(x y)'])
 })
+
+test("a uniformly indented list takes its first item's indent as the top level", () => {
+  expect(titles('  1. Setup\n  2. Verify\n     1. nested, not a step\n')).toEqual(['Setup', 'Verify'])
+  expect(titles('   1. Setup\n   2. Verify\n')).toEqual(['Setup', 'Verify'])
+  expect(titles('  - [ ] a\n  - [x] b\n    - [ ] nested\n')).toEqual(['a', 'b'])
+  expect(titles('  1. a\n2. b\n')).toEqual(['a', 'b'])
+})
+
+test('an indented list ends at a line that is not an item at its own indent or less', () => {
+  expect(titles('  1. a\n\n     more of a\n\n  A paragraph ends the list.\n\n  2. later\n')).toEqual(['a'])
+})
+
+test('four spaces is too deep to start a list', () => {
+  expect(titles('Text\n    1. not a step\n')).toEqual([])
+})
+
+test('an indented list under a bullet is nested, not the top level', () => {
+  expect(titles('- Setup\n  1. nested\n  2. nested too\n')).toEqual([])
+  expect(titles('- Setup\n  1. nested\n\nA paragraph.\n\n1. Real\n')).toEqual(['Real'])
+  expect(titles('- Group\n  - [ ] nested\n')).toEqual([])
+})

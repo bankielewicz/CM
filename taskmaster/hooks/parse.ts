@@ -143,23 +143,30 @@ function headingSteps(lines: Line[]): Span[] | undefined {
 }
 
 /**
- * The first top-level list of this kind. It runs across blank lines, indented
- * lines and code blocks, and ends at the first other line at column 0.
+ * The first top-level list of this kind, whose first item's indent, up to 3
+ * spaces, is the top level. An indented item inside another list is nested in it.
+ * The list runs across blank lines, deeper lines and code blocks, and ends at the
+ * first other line at its top level or further out.
  */
 function listSteps(lines: Line[], item: RegExp, kind: ParsedStep['kind']): Span[] | undefined {
-  const isItem = (line: Line): RegExpExecArray | null => {
+  const itemIn = (line: Line): { indent: number; text: string } | undefined => {
     const match = line.code ? null : item.exec(line.text)
-    return match && (match[1] ?? '').length < 2 ? match : null
+    return match ? { indent: (match[1] ?? '').length, text: match[2] ?? '' } : undefined
   }
-  const first = lines.findIndex(line => isItem(line) !== null)
+  const startsList = (found: { indent: number }, line: Line): boolean => found.indent < 2 || (found.indent <= 3 && !line.inList)
+  const first = lines.findIndex(line => {
+    const found = itemIn(line)
+    return found !== undefined && startsList(found, line)
+  })
   if (first === -1) return undefined
+  const top = (itemIn(lines[first] as Line) as { indent: number }).indent
   const items: { title: string; index: number }[] = []
   let last = lines.length
   for (let index = first; index < lines.length; index += 1) {
     const line = lines[index] as Line
-    const match = isItem(line)
-    if (match) items.push({ title: title(match[2] ?? ''), index })
-    else if (!line.code && line.text.trim() !== '' && !/^\s/.test(line.text)) {
+    const found = itemIn(line)
+    if (found && found.indent < top + 2) items.push({ title: title(found.text), index })
+    else if (!line.code && line.text.trim() !== '' && line.text.search(/\S/) <= top) {
       last = index
       break
     }
