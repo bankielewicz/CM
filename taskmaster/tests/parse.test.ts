@@ -877,3 +877,17 @@ test('a parenthesis that is not a substitution still ends the delimiter', () => 
   expect(commandsIn(shell('x=$(cat <<EOF)', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('cat <<$X)', 'npm test', '$X', 'make lint'))).toEqual(['make lint'])
 })
+
+test('a line of many unclosed substitutions after << takes linear time', () => {
+  const started = Date.now()
+  for (const opening of ['$(', '${']) {
+    expect(commandsIn(shell(`cat <<${opening} `.repeat(20000), 'npm test'))).toEqual(['npm test'])
+  }
+  expect(Date.now() - started).toBeLessThan(1000)
+})
+
+test('a quote in a delimiter closes at the next one of its kind, and brackets at their match', () => {
+  expect(commandsIn(shell("cat <<'a\"b'", 'npm test', 'a"b', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<${a{b}c}', 'npm test', '${a{b}c}', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$(a}b)', 'npm test', '$(a}b)', 'make lint'))).toEqual(['make lint'])
+})

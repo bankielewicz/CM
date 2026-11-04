@@ -288,7 +288,7 @@ type Heredoc = { word: string; stripTabs: boolean }
  * quotes and backslashes removed. No word, or an unclosed quote, opens nothing.
  * That covers a here-string too, since `<` can't start a word.
  */
-function readHeredoc(text: string, at: number): Heredoc | undefined {
+function readHeredoc(text: string, at: number, closes: () => ReadonlyMap<number, number>): Heredoc | undefined {
   const stripTabs = text[at + 2] === '-'
   let cursor = at + (stripTabs ? 3 : 2)
   while (text[cursor] === ' ' || text[cursor] === '\t') cursor += 1
@@ -296,7 +296,7 @@ function readHeredoc(text: string, at: number): Heredoc | undefined {
   for (; cursor < text.length; cursor += 1) {
     const char = text[cursor] as string
     // Bash takes `$(…)`, `${…}` and `` `…` `` in a delimiter literally, with whatever they hold.
-    const close = char === '`' ? text.indexOf('`', cursor + 1) : char === '$' ? closing(text, cursor + 1) : cursor
+    const close = char === '`' ? (closes().get(cursor) ?? -1) : char === '$' && /[({]/.test(text[cursor + 1] ?? '') ? (closes().get(cursor + 1) ?? -1) : cursor
     if (close === -1) return undefined
     if (close !== cursor) {
       word += text.slice(cursor, close + 1)
@@ -308,7 +308,7 @@ function readHeredoc(text: string, at: number): Heredoc | undefined {
       cursor += 1
       word += text[cursor] ?? ''
     } else if (char === "'" || char === '"') {
-      const close = text.indexOf(char, cursor + 1)
+      const close = closes().get(cursor) ?? -1
       if (close === -1) return undefined
       word += text.slice(cursor + 1, close)
       cursor = close
@@ -318,18 +318,29 @@ function readHeredoc(text: string, at: number): Heredoc | undefined {
 }
 
 /**
- * Where the bracket opening at `open` closes, counting nested ones: -1 if it never
- * does, and `open - 1` when no `(` or `{` is there, so the `$` is an ordinary character.
+ * Where each opening on a line closes: a quote or backtick at the next one of its
+ * kind, and a `(` or `{` at its matching bracket. One that never closes has no entry.
+ * Worked out once per line, so a line of many `<<` stays linear.
  */
-function closing(text: string, open: number): number {
-  const pair = text[open] === '(' ? '()' : text[open] === '{' ? '{}' : ''
-  if (!pair) return open - 1
-  let depth = 0
-  for (let at = open; at < text.length; at += 1) {
-    if (text[at] === pair[0]) depth += 1
-    else if (text[at] === pair[1] && (depth -= 1) === 0) return at
+function closers(text: string): ReadonlyMap<number, number> {
+  const found = new Map<number, number>()
+  const next: Record<string, number> = {}
+  for (let at = text.length - 1; at >= 0; at -= 1) {
+    const char = text[at] as string
+    if (char !== "'" && char !== '"' && char !== '`') continue
+    if (next[char] !== undefined) found.set(at, next[char])
+    next[char] = at
   }
-  return -1
+  const open: Record<string, number[]> = { '(': [], '{': [] }
+  for (let at = 0; at < text.length; at += 1) {
+    const char = text[at] as string
+    if (char === '(' || char === '{') open[char]?.push(at)
+    else if (char === ')' || char === '}') {
+      const from = open[char === ')' ? '(' : '{']?.pop()
+      if (from !== undefined) found.set(from, at)
+    }
+  }
+  return found
 }
 
 /** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
@@ -347,6 +358,8 @@ function readShell(text: string, arithmetic: number): { segments: string[]; here
   let quote = ''
   let start = 0
   let end = text.length
+  let found: ReadonlyMap<number, number> | undefined
+  const closes = (): ReadonlyMap<number, number> => (found ??= closers(text))
   for (let at = 0; at < end; at += 1) {
     const char = text[at]
     if (char === '\\' && quote !== "'") at += 1
@@ -363,7 +376,7 @@ function readShell(text: string, arithmetic: number): { segments: string[]; here
       start = at + (char === ';' ? 1 : 2)
       at = start - 1
     } else if (text.startsWith('<<', at)) {
-      const heredoc = readHeredoc(text, at)
+      const heredoc = readHeredoc(text, at, closes)
       if (heredoc) heredocs.push(heredoc)
       at += 1
     }
