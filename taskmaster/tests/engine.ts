@@ -71,6 +71,8 @@ export type EngineOptions = {
   hangStateWrites?: boolean
   /** The first `$.state` write waits until `world.releaseState()`. */
   holdFirstStateWrite?: boolean
+  /** The first `$.state` write answers but stores nothing, as one that never landed would. */
+  loseFirstStateWrite?: boolean
   /**
    * `$.clock.now()` fails, which makes a capture fail. A `$.state` write can't be
    * made to fail here: beneath `$.state` the kit answers, so a hook that throws is
@@ -94,6 +96,7 @@ export function engine(on: On, options: EngineOptions = {}): World {
   const released = new Promise<void>(resolve => {
     release = resolve
   })
+  let loseState = options.loseFirstStateWrite ?? false
   let heldState = options.holdFirstStateWrite ?? false
   let releaseState: () => void = () => {}
   const stateReleased = new Promise<void>(resolve => {
@@ -239,6 +242,10 @@ export function engine(on: On, options: EngineOptions = {}): World {
       world.stateHeld = true
       changed()
       await stateReleased
+    }
+    if (loseState) {
+      loseState = false
+      return { value: undefined } as never
     }
     world.state.set(`${e.plugin}/${e.key}`, e.value)
     changed()

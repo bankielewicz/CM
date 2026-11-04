@@ -1,6 +1,6 @@
 # Event-order probe
 
-This checks the order of events that P1.1's skill attribution relies on. Run it after a Claude Code update, before trusting `agent-preload` on the new build.
+This checks the order of events that P1.1's skill attribution relies on. Run it after a Claude Code update, before trusting `agent-preload` on the new build. A [second check](#second-check-clear), on the same probe, covers what the captures do across a `/clear`.
 
 **Last passed:** 2.1.318, on 2026-11-04. Update this line and [Results](#results) after each run.
 
@@ -67,15 +67,27 @@ export const register: Register = on => {
     note(event, data)
   }
 
+  // What taskmaster.skills holds, as the skill names, or null when it's unset.
+  const names = (state: unknown): string[] | null =>
+    (state as { value?: { value?: Capture[] } }).value?.value?.map(capture => capture.skill) ?? null
+
   on('session.start', async ($, e, next) => {
     const root = (await $.session.root()).replace(/\/+$/, '')
     write = text => $.fs.write(`${root}/probe.jsonl`, text)
     note('session.start', { version: (await $.session.version()).version })
     return next(e)
   })
-  on('session.end', async (_, e, next) => {
-    note('session.end')
+  on('session.end', async ($, e, next) => {
+    note('session.end', { reason: e.reason, sessionId: e.sessionId, id: await $.session.id(), captures: names(await $.state.get({ plugin: 'taskmaster', key: 'skills' } as never)) })
     await chain
+    return next(e)
+  })
+  on('classic.SessionStart', async ($, e, next) => {
+    note('classic.SessionStart', { source: e.source, id: await $.session.id(), captures: names(await $.state.get({ plugin: 'taskmaster', key: 'skills' } as never)) })
+    return next(e)
+  })
+  on('prompt.submit', async ($, e, next) => {
+    note('prompt.submit', { origin: e.origin.kind, command: e.command?.name ?? null, id: await $.session.id(), captures: names(await $.state.get({ plugin: 'taskmaster', key: 'skills' } as never)) })
     return next(e)
   })
   on('agent.spawn', async (_, e, next) => {
@@ -192,6 +204,8 @@ A model sometimes loads a skill again on its own, so an extra capture after the 
 
 In a background run, `taskmaster.skills` can come before `tool.call:first`, because the main loop's turn ends first.
 
+**A capture in `taskmaster.skills` also shows that the capture landed.** The save runs from a closure on `skill.prompt`'s `$` after that hook has answered, and a failed save leaves only a debug line. So a build that stopped honouring `$` there would show up here as a missing capture, with no failed hook.
+
 ## If it fails
 
 **`turn.step:first` before `skill.prompt`, on any run:** the window now closes too early, so preloads stay unattributed. Tell the owner before changing anything. The fix reopens a decision the owner made: without this close the window is seconds wide (the first tool call), and the plan's D2 options for a wide window are a known wrong-loop path or main-loop skills unattributed for seconds after each spawn. See `docs/taskmaster-plan.md` §9 and P1.1's status in `docs/phase-1-tasks.md`.
@@ -200,10 +214,54 @@ In a background run, `taskmaster.skills` can come before `tool.call:first`, beca
 
 **No `taskmaster.skills` line:** the main loop's turn didn't complete, or the mod didn't load. Rerun with `--debug-file probe.log`, and look for `taskmaster` or `tmprobe` lines saying a hook failed or was skipped.
 
+**A `taskmaster.skills` line with no capture:** the save didn't land. Rerun with `--debug-file probe.log` and look for `taskmaster: couldn't record skill`.
+
+## Second check: `/clear`
+
+**Last passed:** 2.1.318, on 2026-11-04. Update this line and [Results](#results) after each run.
+
+A `/clear` ends the conversation and the process goes on under a new session id: `register()` doesn't run again, and no `session.start` fires. So the mod starts its captures over at `session.end` (`taskmaster/hooks/register.tsx`). That's right only while `session.end` comes before the next `skill.prompt`. Kit tests raise events in the order a test writes them, so nothing else checks this.
+
+`claude -p` has no `/clear`, so this runs in an interactive terminal, with the same files. The first run in the folder asks you to trust it.
+
+```sh
+cd ~/tm-event-order-probe/project
+claude --model haiku --allowedTools "Agent,Skill,Read" \
+  --plugin-dir /path/to/CM/taskmaster --plugin-dir ~/tm-event-order-probe/mod
+```
+
+Enter these in turn, each after the last has answered, then read `probe.jsonl`:
+
+```text
+/notes
+/clear
+/forked
+/exit
+```
+
+**It passes when the log shows these, in this order:**
+
+| Line | Expected |
+| --- | --- |
+| `taskmaster.skills` | `notes`, `main`, `typed` |
+| `session.end` | `reason: "clear"`, with `sessionId` and `id` the first session's |
+| `classic.SessionStart` | `source: "clear"`, a new `id`, and `captures: null`, because `$.state` has emptied |
+| `skill.prompt` | `forked` |
+| the last `taskmaster.skills` | only `forked`, `unknown`, `unattributed`. No `notes` |
+
+The first `session.end` line's own `captures` can be the old list or `[]`, depending on whether the reset has run yet. Exiting adds a last `session.end` with `reason: "prompt_input_exit"`.
+
+**`session.end` missing, or after the next `skill.prompt`:** the reset no longer comes first, so old captures can reach the new conversation. Tell the owner before changing anything.
+
+**`notes` in the last `taskmaster.skills`:** the reset isn't working. Before the fix, 2.1.318 logged `notes` and `forked` here, the next save having written the old capture back.
+
+**`captures` not `null` at `classic.SessionStart`:** `$.state` no longer empties on `/clear`. The mod copes, because its reset also writes an empty list, so `[]` still passes. Record it in plan §9.
+
 ## Results
 
 Add a line after each run, and record what's new in plan §9.
 
 | Build | Date | Runs | Result |
 | --- | --- | --- | --- |
+| 2.1.318 | 2026-11-04 | `/clear`, in a terminal driven through tmux, before and after P1.1's reset | Before: `notes` and `forked` held after `/clear`, the defect this check was added for. After: only `forked`. Passed |
 | 2.1.318 | 2026-11-04 | 7 preload runs (4 foreground, 3 background), by an earlier version of this probe; then the five runs above, from this document | Passed |
