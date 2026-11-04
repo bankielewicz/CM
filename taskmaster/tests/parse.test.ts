@@ -450,3 +450,43 @@ test('a body opening with a thematic break keeps its steps and rules', () => {
     expect(parsed.rules.map(rule => rule.text)).toEqual(['You MUST x.'])
   }
 })
+
+test('an indented code block after a blank line gives no rule, step or command', () => {
+  const body = `Example:
+
+    You MUST enable it.
+
+    NEVER retry.
+    1. not a step
+    - [ ] not a step
+    npm test
+
+\tALWAYS in a tab block too.
+`
+  const parsed = parseSkill(skill(body), {})
+  expect(parsed.rules).toEqual([])
+  expect(parsed.steps).toEqual([])
+  expect(parsed.verifyCandidates).toEqual([])
+})
+
+test('an indented block at the very start of the body is code', () => {
+  expect(parseSkill(skill('    You MUST not see this.\n'), {}).rules).toEqual([])
+})
+
+test('an indented line with no blank line before it continues its paragraph, so its rule counts', () => {
+  expect(parseSkill(skill('Some text\n    You MUST keep this.\n'), {}).rules.map(rule => rule.kind)).toEqual(['MUST'])
+  expect(parseSkill(skill(`${shell('ls')}    You MUST keep this too.\n`), {}).rules.map(rule => rule.kind)).toEqual(['MUST'])
+})
+
+test("a list item's indented continuation paragraph keeps its MUST rule, and the list keeps its steps", () => {
+  const numbered = parseSkill(skill('1. Item\n\n    You MUST keep this.\n\n2. Next\n'), {})
+  expect(numbered.rules.map(rule => rule.kind)).toEqual(['MUST'])
+  expect(numbered.steps.map(step => step.title)).toEqual(['Item', 'Next'])
+  expect(parseSkill(skill('- bullet\n\n    NEVER drop this.\n'), {}).rules.map(rule => rule.kind)).toEqual(['NEVER'])
+  expect(parseSkill(skill('  * indented bullet\n\n    ALWAYS keep this.\n'), {}).rules.map(rule => rule.kind)).toEqual(['ALWAYS'])
+})
+
+test('indented lines are code again once a list has ended', () => {
+  expect(parseSkill(skill('- item\n\nA paragraph.\n\n    You MUST not see this.\n'), {}).rules).toEqual([])
+  expect(parseSkill(skill('- item\n\n## Next\n\n    You MUST not see this.\n'), {}).rules).toEqual([])
+})

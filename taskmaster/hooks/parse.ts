@@ -27,7 +27,12 @@ const VERIFY: readonly RegExp[] = [
   /^mvn\s+(test|verify|package)\b/,
 ]
 
-type Line = { text: string; number: number; code?: { lang: string } }
+/** An indented code block's language: it has none, and isn't read for commands, which come from fences. */
+const INDENTED = 'indented'
+const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/
+
+/** `inList`: a list was open when this line began. */
+type Line = { text: string; number: number; code?: { lang: string }; inList?: boolean }
 
 /** A step and the lines that belong to it, for placing commands under steps. */
 type Span = { step: ParsedStep; end: number }
@@ -60,17 +65,31 @@ function body(text: string): { text: string; number: number }[] {
   return all.slice(start, end === -1 ? all.length : end)
 }
 
-/** Marks each line inside a fenced code block, whatever the fence's indent, with the block's language. */
+/**
+ * Marks each line inside a code block: fenced, whatever the fence's indent, with
+ * the block's language, or indented four spaces after a blank line. Inside a list
+ * those indented lines are the item's own paragraphs, so they stay text and their
+ * rules count. A list ends at the first other line at column 0, as in listSteps.
+ */
 function classify(lines: { text: string; number: number }[]): Line[] {
   let fence: { marker: string; lang: string } | undefined
+  let inList = false
+  let codeMayStart = true
   return lines.map(line => {
     const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)/.exec(line.text)
     if (!fence) {
       if (open?.[1]) {
         fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase() }
+        codeMayStart = false
         return { ...line, code: { lang: '' } }
       }
-      return line
+      const blank = line.text.trim() === ''
+      if (!blank && !inList && codeMayStart && /^(?: {4}|\t)/.test(line.text)) return { ...line, code: { lang: INDENTED } }
+      codeMayStart = blank
+      const marked = inList ? { ...line, inList } : line
+      if (LIST_ITEM.test(line.text)) inList = true
+      else if (!blank && !/^\s/.test(line.text)) inList = false
+      return marked
     }
     const current = fence
     const trimmed = line.text.trim()
