@@ -140,19 +140,23 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       }
       const blank = line.text.trim() === ''
       const inHtml = htmlCloser !== undefined
-      if (!blank && !inHtml && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : columns(/^\s*/.exec(line.text)?.[0] ?? '') >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
+      const indent = columns(/^\s*/.exec(line.text)?.[0] ?? '')
+      if (!blank && !inHtml && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : indent >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
       // A block tag's block ends at a blank line. One of types 1 to 5 ends at its closer, past blank lines when the closer comes
       // later, and else at the first blank line, so an unclosed opener can't hide the rest of the skill (the owner's choice, 2026-11-05).
       if (htmlCloser !== undefined && (htmlCloser === '' ? blank : line.text.includes(htmlCloser) || (blank && !closerLater(htmlCloser, index)))) htmlCloser = undefined
       const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}), ...(inHtml ? { inHtml } : {}) }
       // A setext underline closes the paragraph above it only at that paragraph's own level, a quote's or an item's content. Anywhere else `===` is lazy text.
-      const underline = afterText && SETEXT.test(opening.text) && opening.depth === paragraphDepth && (listIndent === undefined || columns(/^\s*/.exec(line.text)?.[0] ?? '') >= contentIndent)
-      afterText = !inHtml && !underline && isParagraph(opening.text)
-      if (afterText) paragraphDepth = opening.depth
-      // Indented code can start anywhere but in a paragraph, and a fence's close is no paragraph either.
-      codeMayStart = !afterText
+      const underline = afterText && SETEXT.test(opening.text) && opening.depth === paragraphDepth && (listIndent === undefined || indent >= contentIndent)
       // `* * *` and `- - -` have a list marker's shape, and are thematic breaks.
       const item = THEMATIC_BREAK.test(line.text) ? null : ANY_ITEM.exec(line.text)
+      // A paragraph's level is where it starts. A list item or a deeper quote marker starts a new one, and a line at its
+      // level or shallower continues it, lazily when shallower.
+      const continues = afterText && !item && opening.depth <= paragraphDepth
+      afterText = !inHtml && !underline && isParagraph(opening.text)
+      if (afterText && !continues) paragraphDepth = opening.depth
+      // Indented code can start anywhere but in a paragraph, and a fence's close is no paragraph either.
+      codeMayStart = !afterText
       if (item) {
         const marker = columns(item[1] as string)
         const spaces = columns(`${item[1]}${item[2]}`) - marker

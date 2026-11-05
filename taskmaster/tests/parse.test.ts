@@ -1138,3 +1138,12 @@ test('a fence opened in a blockquote ends a list as any quote line does, and no 
   expect(rulesIn('<div>\n```\nYou MUST y\n```\n')).toEqual(['MUST'])
   expect(commandsIn('<!-- c\n```bash\nnpm test\n```\n-->\n')).toEqual([])
 })
+
+test("a lazy line keeps its paragraph's level, so === after it is lazy text and the paragraph runs on", () => {
+  expect(rulesIn('> q\nlazy\n===\n    You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('> q\n===\n===\n    You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('> > q\ntext\n===\n    You MUST x\n')).toEqual(['MUST'])
+  // A deeper quote, or a list item, starts a paragraph of its own, at its own level.
+  expect(rulesIn('text\n> > q\n===\n\t\tMUST tabs\n')).toEqual(['MUST'])
+  expect(rulesIn('> > q\n   MUST three\n- bullet\n  ===\n        MUST eight\n')).toEqual(['MUST'])
+})
