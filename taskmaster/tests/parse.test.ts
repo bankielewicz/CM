@@ -617,7 +617,7 @@ test("a terminator is matched after the code block's own indent comes off, and n
 })
 
 test('with nothing to read as a delimiter, or an unclosed quote, no heredoc opens', () => {
-  for (const line of ['cat <<(x', "cat <<''", "cat <<'EOF", 'cat <<"EOF', 'cat <<EOF"']) {
+  for (const line of ['cat <<(x', "cat <<'EOF", 'cat <<"EOF', 'cat <<EOF"']) {
     expect(commandsIn(shell(line, 'x', 'npm test'))).toEqual(['npm test'])
   }
 })
@@ -903,4 +903,10 @@ test("a heredoc delimiter's own metacharacters are not read as shell syntax, whi
   expect(commandsIn(shell('cat <<$(x; npm test)', 'body', '$(x; npm test)', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('cat <<$(x && npm test)', 'body', '$(x && npm test)', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('cat <<$(x) && npm test', 'body', '$(x)', 'make lint'))).toEqual(['npm test', 'make lint'])
+})
+
+test('an empty quoted delimiter opens a heredoc that ends at the first empty line, as bash reads it', () => {
+  expect(commandsIn(shell("cat <<''", 'npm test', '', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<""', 'npm test', '', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell("cat <<''", 'npm test', 'EOF'))).toEqual([])
 })

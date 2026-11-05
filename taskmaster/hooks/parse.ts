@@ -286,13 +286,15 @@ type Heredoc = { word: string; stripTabs: boolean; end: number }
 /**
  * Reads the heredoc opened by the `<<` at `at`: the whole delimiter word, with its
  * quotes and backslashes removed. No word, or an unclosed quote, opens nothing.
- * That covers a here-string too, since `<` can't start a word.
+ * That covers a here-string too, since `<` can't start a word. An empty quoted
+ * word opens one that ends at the first empty line, as bash reads `<<''`.
  */
 function readHeredoc(text: string, at: number, closes: () => ReadonlyMap<number, number>): Heredoc | undefined {
   const stripTabs = text[at + 2] === '-'
   let cursor = at + (stripTabs ? 3 : 2)
   while (text[cursor] === ' ' || text[cursor] === '\t') cursor += 1
   let word = ''
+  let quoted = false
   for (; cursor < text.length; cursor += 1) {
     const char = text[cursor] as string
     // Bash takes `$(…)`, `${…}` and `` `…` `` in a delimiter literally, with whatever they hold.
@@ -312,9 +314,10 @@ function readHeredoc(text: string, at: number, closes: () => ReadonlyMap<number,
       if (close === -1) return undefined
       word += text.slice(cursor + 1, close)
       cursor = close
+      quoted = true
     } else word += char
   }
-  return word ? { word, stripTabs, end: cursor } : undefined
+  return word || quoted ? { word, stripTabs, end: cursor } : undefined
 }
 
 /**
