@@ -113,7 +113,14 @@ function classify(lines: { text: string; number: number }[]): Line[] {
   let codeMayStart = true
   let afterText = false
   let paragraphDepth = 0
-  return lines.map(line => {
+  // Where each closer string last appears, worked out once at the first opener that needs it, so a block runs past a
+  // blank line only when its closer comes later, and a document of unclosed openers stays linear.
+  let lastClosers: ReadonlyMap<string, number> | undefined
+  const closerLater = (closer: string, index: number): boolean => {
+    lastClosers ??= new Map(HTML_BLOCKS.map(([, end]) => [end, lines.findLastIndex(raw => raw.text.includes(end))]))
+    return (lastClosers.get(closer) ?? -1) >= index
+  }
+  return lines.map((line, index) => {
     // A fence inside a blockquote runs while its lines keep the quote's markers. A line without them ends the quote, and the fence with it.
     const quoted = fence && fence.quotes > 0 ? unquote(line.text, fence.quotes) : undefined
     if (fence && quoted && quoted.depth < fence.quotes) {
@@ -133,8 +140,9 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       const blank = line.text.trim() === ''
       const inHtml = htmlCloser !== undefined
       if (!blank && !inHtml && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : columns(/^\s*/.exec(line.text)?.[0] ?? '') >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
-      // A blank line ends any of them. CommonMark lets a comment run on past one, and reading on from there is what `main` did.
-      if (htmlCloser !== undefined && (blank || (htmlCloser !== '' && line.text.includes(htmlCloser)))) htmlCloser = undefined
+      // A block tag's block ends at a blank line. One of types 1 to 5 ends at its closer, past blank lines when the closer comes
+      // later, and else at the first blank line, so an unclosed opener can't hide the rest of the skill (the owner's choice, 2026-11-05).
+      if (htmlCloser !== undefined && (htmlCloser === '' ? blank : line.text.includes(htmlCloser) || (blank && !closerLater(htmlCloser, index)))) htmlCloser = undefined
       const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}), ...(inHtml ? { inHtml } : {}) }
       // A setext underline closes the paragraph above it only at that paragraph's own level, a quote's or an item's content. Anywhere else `===` is lazy text.
       const underline = afterText && SETEXT.test(opening.text) && opening.depth === paragraphDepth && (listIndent === undefined || columns(/^\s*/.exec(line.text)?.[0] ?? '') >= contentIndent)

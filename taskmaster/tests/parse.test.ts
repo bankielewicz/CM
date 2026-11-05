@@ -831,7 +831,7 @@ test('an HTML block closed on its own line leaves the next line alone', () => {
   }
 })
 
-test('a blank line ends any HTML block, so a list after one is read', () => {
+test('a blank line ends an HTML block with no closer later, so a list after one is read', () => {
   expect(titles('<div>\n\n1. a\n')).toEqual(['a'])
   expect(titles('<!-- c\n\n1. a\n')).toEqual(['a'])
 })
@@ -1028,4 +1028,27 @@ test('<< inside $[…] is a shift, as in $((…)), while a bare [ is the test co
   expect(commandsIn(shell('echo $[ (1<<2) ] && npm test'))).toEqual(['npm test'])
   expect(commandsIn(shell('[ -f x ] && npm test'))).toEqual(['npm test'])
   expect(commandsIn(shell('echo ${a[1]} <<EOF', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+})
+
+
+test('an HTML block of types 1 to 5 runs to its closer past blank lines when one comes later, so a list inside it is not read', () => {
+  expect(titles('<!-- c\n\n1. a\n-->\n1. b\n')).toEqual(['b'])
+  expect(titles('<pre>\n\n1. a\n</pre>\n1. b\n')).toEqual(['b'])
+  expect(titles('<?x\n\n1. a\n?>\n1. b\n')).toEqual(['b'])
+  expect(titles('<!X\n\n1. a\n>\n1. b\n')).toEqual(['b'])
+  expect(titles('<![CDATA[\n\n1. a\n]]>\n1. b\n')).toEqual(['b'])
+  expect(rulesIn('<!-- c\n\n    You MUST x\n-->\n')).toEqual(['MUST'])
+})
+
+test('a block tag still ends at a blank line, closer or not, and a closer before the opener does not count', () => {
+  expect(titles('<div>\n\n1. a\n</div>\n')).toEqual(['a'])
+  expect(titles('-->\n<!-- c\n\n1. a\n')).toEqual(['a'])
+})
+
+test('a document of unclosed or late-closed HTML openers takes linear time', () => {
+  const started = Date.now()
+  expect(parseSkill(skill(`${'<!-- x\n'.repeat(20000)}`), {}).steps).toEqual([])
+  expect(parseSkill(skill(`${'<!-- x\n'.repeat(20000)}-->\n`), {}).steps).toEqual([])
+  expect(parseSkill(skill(`${'<!-- x\n\n'.repeat(10000)}1. a\n`), {}).steps.map(step => step.title)).toEqual(['a'])
+  expect(Date.now() - started).toBeLessThan(1000)
 })
