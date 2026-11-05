@@ -66,6 +66,13 @@ function unquote(text: string, depth: number): { text: string; depth: number } {
   return { text: text.slice(at), depth: found }
 }
 
+/** How far a quoted line's content is indented, in columns past its last marker and the one column that marker may take. */
+function quotedIndent(text: string): number {
+  const markers = (/^(?: {0,3}> ?)+/.exec(text)?.[0] ?? '').replace(/ $/, '')
+  const lead = /^[ \t]*/.exec(text.slice(markers.length))?.[0] ?? ''
+  return Math.max(0, columns(markers + lead) - columns(markers) - 1)
+}
+
 /** A step and the lines that belong to it, for placing commands under steps. */
 type Span = { step: ParsedStep; end: number }
 
@@ -141,7 +148,12 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       const blank = line.text.trim() === ''
       const inHtml = htmlCloser !== undefined
       const indent = columns(/^\s*/.exec(line.text)?.[0] ?? '')
-      if (!blank && !inHtml && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : indent >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
+      // Inside a quote, indent counts from its markers. A list outside the quote doesn't move that.
+      const deep = opening.depth > 0 ? quotedIndent(line.text) >= 4 : listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : indent >= contentIndent + 4
+      if (opening.text.trim() !== '' && !inHtml && codeMayStart && deep) {
+        if (opening.depth > 0 && listIndent !== undefined && endsList(line, listIndent)) listIndent = undefined
+        return { ...line, code: { lang: INDENTED } }
+      }
       // A block tag's block ends at a blank line. One of types 1 to 5 ends at its closer, past blank lines when the closer comes
       // later, and else at the first blank line, so an unclosed opener can't hide the rest of the skill (the owner's choice, 2026-11-05).
       if (htmlCloser !== undefined && (htmlCloser === '' ? blank : line.text.includes(htmlCloser) || (blank && !closerLater(htmlCloser, index)))) htmlCloser = undefined
@@ -310,8 +322,9 @@ function listSteps(lines: Line[], item: RegExp, kind: ParsedStep['kind']): Span[
     const found = itemIn(line)
     if (found && found.indent < top + 2) items.push({ title: title(found.text), index })
     else if (kind === 'checklist' && /^\s*[-*+]\s/.test(line.text)) continue // a plain bullet among the boxes
-    // A fence opened in a blockquote is code, and its quote marker still ends a list.
-    else if ((!line.code || (line.code.fence && QUOTE.test(line.text))) && (LIST_ITEM.test(line.text) ? line.text.search(/\S/) <= top : endsList(line, top))) {
+    // A fence or indented code in a blockquote is code, and its quote marker still ends a list. Lines inside a fence come
+    // without their quote markers, and one starting with `>` there is the code's own.
+    else if ((!line.code || ((line.code.fence || line.code.lang === INDENTED) && QUOTE.test(line.text))) && (LIST_ITEM.test(line.text) ? line.text.search(/\S/) <= top : endsList(line, top))) {
       last = index
       break
     }

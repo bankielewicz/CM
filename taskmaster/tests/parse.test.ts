@@ -1147,3 +1147,16 @@ test("a lazy line keeps its paragraph's level, so === after it is lazy text and 
   expect(rulesIn('text\n> > q\n===\n\t\tMUST tabs\n')).toEqual(['MUST'])
   expect(rulesIn('> > q\n   MUST three\n- bullet\n  ===\n        MUST eight\n')).toEqual(['MUST'])
 })
+
+test("a quoted line four columns past its marker's space is indented code where a paragraph can't continue, tabs counting to the next stop", () => {
+  expect(rulesIn('> q\n>\n>     You MUST not see code.\n')).toEqual([])
+  expect(rulesIn('> # H\n>     You MUST not see code.\n')).toEqual([])
+  expect(rulesIn('- a\n\n  >\n  >     You MUST not see code.\n')).toEqual([])
+  expect(rulesIn('>\t\tYou MUST not see code.\n')).toEqual([])
+  expect(rulesIn('>\tYou MUST keep this.\n')).toEqual(['MUST'])
+  expect(rulesIn('> q\n>     You MUST keep this.\n')).toEqual(['MUST'])
+  expect(rulesIn('>     \n> q\n')).toEqual([])
+  // Its quote marker still ends a list, as any quote line's does.
+  expect(titles('1. a\n\n>     MUST quoted four\n2. b\n')).toEqual(['a'])
+  expect(titles('- [ ] c\n\n>     x\n  1. n\n')).toEqual(['n'])
+})
