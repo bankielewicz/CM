@@ -154,7 +154,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       const inHtml = htmlCloser !== undefined
       // Inside a quote, indent counts from its markers. A list outside the quote doesn't move that.
       const deep = opening.depth > 0 ? quotedIndent(line.text) >= 4 : listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : indent >= contentIndent + 4
-      if (opening.text.trim() !== '' && !inHtml && codeMayStart && deep) {
+      if (!blank && !inHtml && codeMayStart && deep) {
         if (opening.depth > 0 && listIndent !== undefined && endsList(line, listIndent)) listIndent = undefined
         return { ...line, code: { lang: INDENTED } }
       }
@@ -478,7 +478,7 @@ function readShell(text: string, from: ShellState): { segments: string[]; heredo
   const opened = new Set<number>()
   // The closer of a substitution or backtick inside a word: up to it nothing is syntax but quotes, comments, heredocs and arithmetic.
   let sealed = -1
-  // Where the word being read began, and whether a command may start where it did.
+  // Where the word being read began, or -1 between words.
   let word = -1
   const top = (): Group | undefined => groups?.group
   const push = (group: Group): void => {
@@ -491,6 +491,7 @@ function readShell(text: string, from: ShellState): { segments: string[]; heredo
     const group = top()
     return group?.kind === 'case' && group.part === 'pattern'
   }
+  // Whether a command may start here: at a line's start, after an operator or a keyword, but not in a case's patterns.
   let position = !inPattern()
   const cut = (at: number, next: number): void => {
     segments.push(text.slice(start, at))
@@ -525,7 +526,6 @@ function readShell(text: string, from: ShellState): { segments: string[]; heredo
       quote = char
     } else if (arithmetic > 0) arithmetic += char === '(' ? 1 : char === ')' ? -1 : 0
     else if (brackets > 0) brackets += char === '[' ? 1 : char === ']' ? -1 : 0
-    else if (at === sealed) sealed = -1
     else if (text.startsWith('((', at) && isArithmetic(at)) {
       // Inside $((…)) or ((…)), << is a shift, so nothing there can open a heredoc.
       if (word === -1) word = at
@@ -556,8 +556,9 @@ function readShell(text: string, from: ShellState): { segments: string[]; heredo
       const before = text[at - 1] ?? ''
       if (/[$<>]/.test(before)) {
         // `$(`, `<(` and `>(` substitute into the command around them. Where a command starts, or run on to later
-        // lines, their commands are read; closed inside a word, they're part of it.
-        const commandStart = before === '$' && position && word === at - 1
+        // lines, their commands are read; closed inside a word, they're part of it. A `<` or `>` never starts a word, so
+        // only a `$(` can start a command.
+        const commandStart = position && word === at - 1
         if (close !== undefined && !commandStart) sealed = close
         else {
           if (commandStart) cut(at - 1, at + 1)
@@ -593,20 +594,21 @@ function readShell(text: string, from: ShellState): { segments: string[]; heredo
         position = true
       } else {
         pop()
-        // What follows a substitution's `)` is the rest of the word it sat in, so it keeps the `)` and reads as no command.
-        cut(at, group.kind === 'subshell' ? at + 1 : at)
+        // What follows keeps the `)`, so it reads as no command: after a subshell only an operator may come, and after a
+        // substitution the rest of the word it sat in.
+        cut(at, at)
         position = false
       }
     } else if (char === ';' || text.startsWith('&&', at) || text.startsWith('||', at)) {
       endWord(at)
       const group = top()
-      // `;;`, `;&` and `;;&` end a case's commands, and a pattern comes next.
-      const clause = group?.kind === 'case' && group.part === 'body' ? (/^;(;&?|&)/.exec(text.slice(at, at + 3))?.[0].length ?? 0) : 0
-      if (clause > 0) {
+      // `;;`, `;&` and `;;&` end a case's commands, and a pattern comes next. The `&` of `;;&` then starts nothing.
+      const clause = group?.kind === 'case' && group.part === 'body' && /^;[;&]/.test(text.slice(at, at + 2))
+      if (clause) {
         pop()
         push({ kind: 'case', part: 'pattern' })
       }
-      cut(at, at + (clause || (char === ';' ? 1 : 2)))
+      cut(at, at + (clause || char !== ';' ? 2 : 1))
       position = !inPattern()
       at = start - 1
     } else if (char === '|' || char === '&') {

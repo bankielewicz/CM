@@ -1155,7 +1155,6 @@ test("a quoted line four columns past its marker's space is indented code where 
   expect(rulesIn('>\t\tYou MUST not see code.\n')).toEqual([])
   expect(rulesIn('>\tYou MUST keep this.\n')).toEqual(['MUST'])
   expect(rulesIn('> q\n>     You MUST keep this.\n')).toEqual(['MUST'])
-  expect(rulesIn('>     \n> q\n')).toEqual([])
   // Its quote marker still ends a list, as any quote line's does.
   expect(titles('1. a\n\n>     MUST quoted four\n2. b\n')).toEqual(['a'])
   expect(titles('- [ ] c\n\n>     x\n  1. n\n')).toEqual(['n'])
@@ -1168,4 +1167,40 @@ test("a fence in a quote inside a list item ends at a quote marker left of the i
   expect(titles('- bullet\n   > ```\n> # H\n  1. n\n')).toEqual(['n'])
   expect(commandsIn('   > ```bash\n> npm test\n> ```\n')).toEqual(['npm test'])
   expect(commandsIn('1. a\n   > ```bash\n   > npm test\n   > ```\n')).toEqual(['npm test'])
+})
+
+test('a continued line reads each piece with what the piece before left open, and the joined line with what the lines before did', () => {
+  expect(commandsIn(shell('echo "a \\', '# b" \\', 'npm test'))).toEqual([])
+  expect(commandsIn(shell('echo $[1 \\', '# 2] \\', 'npm test'))).toEqual([])
+  expect(commandsIn(shell('cargo test "a \\', 'b" \\', '# c \\', 'npm test'))).toEqual(['cargo test "a b"', 'npm test'])
+  expect(commandsIn(shell('cargo test \\', '\\', '--all'))).toEqual(['cargo test --all'])
+  expect(commandsIn(shell('(cd a', 'npm test \\', '--all)'))).toEqual(['npm test --all'])
+})
+
+test('a heredoc word is skipped whole, so its escaped space and # start no comment', () => {
+  expect(commandsIn(shell('cat <<a\\ #b; npm test', 'body', 'a #b', 'make lint'))).toEqual(['npm test', 'make lint'])
+})
+
+test('backticks closed inside a word, and a substitution in a case pattern, are sealed as $(…) is', () => {
+  expect(commandsIn(shell('echo `a; npm test`'))).toEqual([])
+  expect(commandsIn(shell('case x in a|$(npm test)) b;; esac'))).toEqual([])
+  expect(commandsIn(shell('case x in', '$(npm test)) b;;', 'esac'))).toEqual([])
+})
+
+test("an array's ) ends nothing, and a group once closed is no longer open", () => {
+  expect(commandsIn(shell('(cd a', 'x=(1 2); npm test)'))).toEqual(['npm test'])
+  expect(commandsIn('```\ncase x in a) (npm test);; esac\n1) go vet\n```\n')).toEqual(['npm test'])
+})
+
+test('esac ends a case only where a command or pattern may start, a ) in a clause ends nothing, and a clause may open with a subshell', () => {
+  expect(commandsIn(shell('case x in a) echo esac ;;', '1) npm test', 'esac'))).toEqual(['npm test'])
+  expect(commandsIn('```\ncase x in a) npm test; esac\nsee ;; 1) go vet\n```\n')).toEqual(['npm test'])
+  expect(commandsIn(shell('case x in a) echo done :) npm test;; esac'))).toEqual([])
+  expect(commandsIn(shell('case x in a) (npm test) ;; esac'))).toEqual(['npm test'])
+  expect(commandsIn('```\ncase studies\nfound in docs\n1) npm test\n```\n')).toEqual([])
+})
+
+test("a > line inside an unquoted fence is the code's own, and a quoted line three columns past its marker is text", () => {
+  expect(commandsIn('1. [ ] x\n   ```bash\n   npm test\n> q\n   npm test\n')).toEqual(['npm test'])
+  expect(rulesIn('> q\n>\n>    You MUST keep this.\n')).toEqual(['MUST'])
 })
