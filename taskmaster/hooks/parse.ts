@@ -312,7 +312,9 @@ function readHeredoc(text: string, at: number, closes: () => ReadonlyMap<number,
     } else if (char === "'" || char === '"') {
       const close = closes().get(cursor) ?? -1
       if (close === -1) return undefined
-      word += text.slice(cursor + 1, close)
+      const inside = text.slice(cursor + 1, close)
+      // In double quotes a backslash escapes only these four; in single quotes it's literal.
+      word += char === '"' ? inside.replace(/\\([\\"$`])/g, '$1') : inside
       cursor = close
       quoted = true
     } else word += char
@@ -321,25 +323,29 @@ function readHeredoc(text: string, at: number, closes: () => ReadonlyMap<number,
 }
 
 /**
- * Where each opening on a line closes: a quote or backtick at the next one of its
- * kind, and a `(` or `{` at its matching bracket. One that never closes has no entry.
- * Worked out once per line, so a line of many `<<` stays linear.
+ * Where each opening on a line closes: a quote at the next unescaped one of its
+ * kind, and a `(`, `{` or backtick at its match outside quotes. A backslash
+ * escapes the next character except inside single quotes, and inside quotes
+ * nothing else opens or closes. One that never closes has no entry. Worked out
+ * once per line, so a line of many `<<` stays linear.
  */
 function closers(text: string): ReadonlyMap<number, number> {
   const found = new Map<number, number>()
-  const next: Record<string, number> = {}
-  for (let at = text.length - 1; at >= 0; at -= 1) {
-    const char = text[at] as string
-    if (char !== "'" && char !== '"' && char !== '`') continue
-    if (next[char] !== undefined) found.set(at, next[char])
-    next[char] = at
-  }
-  const open: Record<string, number[]> = { '(': [], '{': [] }
+  const open: Record<string, number[]> = { '(': [], '{': [], '`': [] }
+  let quote: { char: string; at: number } | undefined
   for (let at = 0; at < text.length; at += 1) {
     const char = text[at] as string
-    if (char === '(' || char === '{') open[char]?.push(at)
-    else if (char === ')' || char === '}') {
-      const from = open[char === ')' ? '(' : '{']?.pop()
+    if (char === '\\' && quote?.char !== "'") at += 1
+    else if (quote) {
+      if (char === quote.char) {
+        found.set(quote.at, at)
+        quote = undefined
+      }
+    } else if (char === "'" || char === '"') quote = { char, at }
+    else if (char === '(' || char === '{') open[char]?.push(at)
+    else if (char === '`' && open[char]?.length === 0) open[char]?.push(at)
+    else if (char === ')' || char === '}' || char === '`') {
+      const from = open[char === ')' ? '(' : char === '}' ? '{' : '`']?.pop()
       if (from !== undefined) found.set(from, at)
     }
   }

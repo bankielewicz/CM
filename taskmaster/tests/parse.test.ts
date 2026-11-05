@@ -910,3 +910,12 @@ test('an empty quoted delimiter opens a heredoc that ends at the first empty lin
   expect(commandsIn(shell('cat <<""', 'npm test', '', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell("cat <<''", 'npm test', 'EOF'))).toEqual([])
 })
+
+test('a backslash inside a double-quoted delimiter escapes the next character, and inside single quotes is literal', () => {
+  expect(commandsIn(shell('cat <<"a\\"b"', 'make test', 'a"b', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<"a\\\\b"', 'make test', 'a\\b', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<"a\\$b"', 'make test', 'a$b', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<"a\\xb"', 'make test', 'a\\xb', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell("cat <<'a\\b'", 'make test', 'a\\b', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<`a\\`b`', 'make test', '`a\\`b`', 'make lint'))).toEqual(['make lint'])
+})
