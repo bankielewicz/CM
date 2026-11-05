@@ -41,12 +41,30 @@ function columns(text: string): number {
 }
 
 /**
- * `fence`: the line is a code fence itself. `indent`: the fence's, on the lines
- * inside it. `inList`: a list was open when this line began. `afterText`: the line
- * before it was paragraph text, which this line may lazily continue. `inHtml`: an
- * HTML block was open when this line began, so a list marker on it isn't an item.
+ * `text`: the line's own, except inside a fence in a blockquote, where the quote's
+ * markers are off. `fence`: the line is a code fence itself. `indent`: the fence's,
+ * on the lines inside it. `inList`: a list was open when this line began.
+ * `afterText`: the line before it was paragraph text, which this line may lazily
+ * continue. `inHtml`: an HTML block was open when this line began, so a list
+ * marker on it isn't an item.
  */
 type Line = { text: string; number: number; code?: { lang: string; fence?: true; indent?: number }; inList?: boolean; afterText?: boolean; inHtml?: boolean }
+
+/** An open code fence. `quotes`: the blockquote markers before it, which its lines keep. */
+type Fence = { marker: string; lang: string; indent: number; quotes: number }
+
+/** The text after up to `depth` blockquote markers, and how many came off. */
+function unquote(text: string, depth: number): { text: string; depth: number } {
+  const prefix = /^(?: {0,3}> ?)+/.exec(text)?.[0] ?? ''
+  let at = 0
+  let found = 0
+  while (found < depth && at < prefix.length) {
+    at = prefix.indexOf('>', at) + 1
+    if (prefix[at] === ' ') at += 1
+    found += 1
+  }
+  return { text: text.slice(at), depth: found }
+}
 
 /** A step and the lines that belong to it, for placing commands under steps. */
 type Span = { step: ParsedStep; end: number }
@@ -88,18 +106,22 @@ function body(text: string): { text: string; number: number }[] {
  * indent, and ends as `endsList` says.
  */
 function classify(lines: { text: string; number: number }[]): Line[] {
-  let fence: { marker: string; lang: string; indent: number } | undefined
+  let fence: Fence | undefined
   let listIndent: number | undefined
   let contentIndent = 0
   let htmlCloser: string | undefined
   let codeMayStart = true
   let afterText = false
   return lines.map(line => {
+    // A fence inside a blockquote runs while its lines keep the quote's markers. A line without them ends the quote, and the fence with it.
+    const quoted = fence && fence.quotes > 0 ? unquote(line.text, fence.quotes) : undefined
+    if (fence && quoted && quoted.depth < fence.quotes) fence = undefined
     if (!fence) {
-      const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)(.*)$/.exec(line.text)
+      const opening = unquote(line.text, Number.POSITIVE_INFINITY)
+      const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)(.*)$/.exec(opening.text)
       // A backtick fence's opening line can't hold another backtick: that's inline code.
       if (open?.[1] && !(open[1].startsWith('`') && open[3]?.includes('`'))) {
-        fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase(), indent: line.text.search(/\S/) }
+        fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase(), indent: opening.text.search(/\S/), quotes: opening.depth }
         codeMayStart = false
         afterText = false
         return { ...line, code: { lang: '', fence: true } }
@@ -126,12 +148,13 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       return marked
     }
     const current = fence
-    const trimmed = line.text.trim()
+    const text = quoted?.text ?? line.text
+    const trimmed = text.trim()
     if (trimmed.startsWith(current.marker[0] ?? '`') && /^(`{3,}|~{3,})$/.test(trimmed) && trimmed.length >= current.marker.length) {
       fence = undefined
       return { ...line, code: { lang: '', fence: true } }
     }
-    return { ...line, code: { lang: current.lang, indent: current.indent } }
+    return { ...line, text, code: { lang: current.lang, indent: current.indent } }
   })
 }
 

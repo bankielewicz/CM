@@ -985,3 +985,17 @@ test("an indented line straight after a blockquote's paragraph, a list item or a
   expect(rulesIn('- a\n    You MUST x\n')).toEqual(['MUST'])
   expect(rulesIn('<div>\n    You MUST x\n')).toEqual(['MUST'])
 })
+
+test('a code fence inside a blockquote is code: its commands are read with the quote markers off, and its lines are not text', () => {
+  expect(commandsIn('> ```bash\n> npm test\n> ```\n')).toEqual(['npm test'])
+  expect(rulesIn('> ```\n> You MUST not see code.\n> ```\n')).toEqual([])
+  expect(titles('> ```\n> 1. not a step\n> ```\n')).toEqual([])
+  expect(commandsIn('> ```bash\n> cat <<EOF\n> npm test\n> EOF\n> make lint\n> ```\n')).toEqual(['make lint'])
+  expect(commandsIn('> > ```bash\n> > npm test\n> > ```\n')).toEqual(['npm test'])
+  expect(commandsIn('>```bash\n>npm test\n>```\n')).toEqual(['npm test'])
+})
+
+test("a line without the quote's markers ends the quote, and the fence inside it", () => {
+  expect(rulesIn('> ```\n> code\nYou MUST see this.\n')).toEqual(['MUST'])
+  expect(commandsIn('> ```bash\n> npm test\n\n```bash\nmake lint\n```\n')).toEqual(['npm test', 'make lint'])
+})
