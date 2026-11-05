@@ -919,6 +919,7 @@ test('a backslash inside a double-quoted delimiter escapes the next character, a
   expect(commandsIn(shell('cat <<"a\\$b"', 'make test', 'a$b', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('cat <<"a\\xb"', 'make test', 'a\\xb', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell("cat <<'a\\b'", 'make test', 'a\\b', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell("cat <<'a\\'", 'make test', 'a\\', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('cat <<`a\\`b`', 'make test', '`a\\`b`', 'make lint'))).toEqual(['make lint'])
 })
 
@@ -993,6 +994,7 @@ test('a code fence inside a blockquote is code: its commands are read with the q
   expect(commandsIn('> ```bash\n> cat <<EOF\n> npm test\n> EOF\n> make lint\n> ```\n')).toEqual(['make lint'])
   expect(commandsIn('> > ```bash\n> > npm test\n> > ```\n')).toEqual(['npm test'])
   expect(commandsIn('>```bash\n>npm test\n>```\n')).toEqual(['npm test'])
+  expect(commandsIn('> ```bash\n> > npm test\n> ```\n')).toEqual([])
 })
 
 test("a line without the quote's markers ends the quote, and the fence inside it", () => {
