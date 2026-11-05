@@ -980,6 +980,8 @@ test('an indented line straight after a heading, thematic break, setext underlin
   expect(titles('# H\n    1. not a step\n')).toEqual([])
   expect(rulesIn(`${shell('ls')}    You MUST not see code.\n`)).toEqual([])
   expect(rulesIn('> ```\n> code\n    You MUST not see code.\n')).toEqual([])
+  expect(rulesIn(`Some text\n${shell('ls')}    You MUST not see code.\n`)).toEqual([])
+  expect(rulesIn('text\n> ```\n> code\n    You MUST not see code.\n')).toEqual([])
 })
 
 test("an indented line straight after a blockquote's paragraph, a list item or an open HTML block continues it, so its rule counts", () => {
