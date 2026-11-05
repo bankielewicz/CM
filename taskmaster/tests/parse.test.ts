@@ -1075,3 +1075,9 @@ test('a long run of continued lines takes linear time, with or without heredocs 
   expect(commandsIn(shell(...Array<string>(5000).fill('cat <<EOF \\'), '&& npm test'))).toEqual(['npm test'])
   expect(Date.now() - started).toBeLessThan(1000)
 })
+
+test('a line of many parentheses where no command may start takes linear time', () => {
+  const started = Date.now()
+  expect(commandsIn(shell(`a;${' '.repeat(40000)}x${' ('.repeat(40000)}; npm test`))).toEqual(['npm test'])
+  expect(Date.now() - started).toBeLessThan(1000)
+})

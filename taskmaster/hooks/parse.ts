@@ -431,6 +431,9 @@ function readShell(text: string, from: ShellState): { segments: string[]; heredo
   // The closing parentheses of the groups open here, innermost last, and those that end a command because one ended inside their group.
   const groups: number[] = []
   const ends = new Set<number>()
+  // The segment start at which a `(` last found more than keywords before it. That `(` is then part of the text since
+  // the start, so no later one can find only keywords until a cut moves the start: the test runs once per segment.
+  let wordsSince = -1
   const cut = (at: number, next: number): void => {
     segments.push(text.slice(start, at))
     start = next
@@ -457,7 +460,8 @@ function readShell(text: string, from: ShellState): { segments: string[]; heredo
       // neither of its parentheses is part of what runs inside. Anywhere else, as in a diagram, it's a character like any other.
       const close = closes().get(at)
       const substitution = /[$<>]/.test(text[at - 1] ?? '')
-      const subshell = !substitution && COMMAND_POSITION.test(text.slice(start, at))
+      const subshell = !substitution && wordsSince !== start && COMMAND_POSITION.test(text.slice(start, at))
+      if (!substitution && !subshell) wordsSince = start
       if (subshell) {
         cut(at, at + 1)
         if (close !== undefined) ends.add(close)
