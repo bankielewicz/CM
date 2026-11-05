@@ -130,9 +130,11 @@ function classify(lines: { text: string; number: number }[]): Line[] {
     if (!fence) {
       const opening = unquote(line.text, Number.POSITIVE_INFINITY)
       const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)(.*)$/.exec(opening.text)
-      // A backtick fence's opening line can't hold another backtick: that's inline code.
-      if (open?.[1] && !(open[1].startsWith('`') && open[3]?.includes('`'))) {
+      // A backtick fence's opening line can't hold another backtick: that's inline code. Inside an HTML block a fence is HTML.
+      if (open?.[1] && htmlCloser === undefined && !(open[1].startsWith('`') && open[3]?.includes('`'))) {
         fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase(), indent: opening.text.search(/\S/), quotes: opening.depth }
+        // A quote's marker can end a list, whatever the quote holds.
+        if (opening.depth > 0 && listIndent !== undefined && endsList(line, listIndent)) listIndent = undefined
         afterText = false
         return { ...line, code: { lang: '', fence: true } }
       }
@@ -211,9 +213,11 @@ function opensHtml(text: string): string | undefined {
   return end && text.includes(end) ? undefined : end
 }
 
+const QUOTE = /^ {0,3}>/
+
 /** Whether a line can interrupt a paragraph by starting a block of its own. Fences and list items are read before this. */
 function startsBlock(text: string): boolean {
-  return HEADING.test(text) || THEMATIC_BREAK.test(text) || /^ {0,3}>/.test(text) || htmlEnd(text) !== undefined
+  return HEADING.test(text) || THEMATIC_BREAK.test(text) || QUOTE.test(text) || htmlEnd(text) !== undefined
 }
 
 /** Whether a line, its blockquote markers off, is paragraph text, which the line after it may lazily continue. */
@@ -302,7 +306,8 @@ function listSteps(lines: Line[], item: RegExp, kind: ParsedStep['kind']): Span[
     const found = itemIn(line)
     if (found && found.indent < top + 2) items.push({ title: title(found.text), index })
     else if (kind === 'checklist' && /^\s*[-*+]\s/.test(line.text)) continue // a plain bullet among the boxes
-    else if (!line.code && (LIST_ITEM.test(line.text) ? line.text.search(/\S/) <= top : endsList(line, top))) {
+    // A fence opened in a blockquote is code, and its quote marker still ends a list.
+    else if ((!line.code || (line.code.fence && QUOTE.test(line.text))) && (LIST_ITEM.test(line.text) ? line.text.search(/\S/) <= top : endsList(line, top))) {
       last = index
       break
     }

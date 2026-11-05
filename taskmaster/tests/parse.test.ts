@@ -1128,3 +1128,13 @@ test('a long run of lines that each leave a group open takes linear time', () =>
   expect(commandsIn(shell(...Array<string>(20000).fill('('), `npm test${')'.repeat(20000)}`))).toEqual(['npm test'])
   expect(Date.now() - started).toBeLessThan(1000)
 })
+
+test('a fence opened in a blockquote ends a list as any quote line does, and no fence opens inside an HTML block', () => {
+  expect(rulesIn('1. Do it\n> ```\n> npm test\n> ```\n\n    You MUST x\n')).toEqual([])
+  expect(rulesIn('- a\n> ```\n\n\t You MUST t\n')).toEqual([])
+  expect(titles('1. a\n> ```\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n   > ```\n   > x\n   > ```\n2. b\n')).toEqual(['a', 'b'])
+  expect(rulesIn('<div>\n> ```\n> You MUST y\n')).toEqual(['MUST'])
+  expect(rulesIn('<div>\n```\nYou MUST y\n```\n')).toEqual(['MUST'])
+  expect(commandsIn('<!-- c\n```bash\nnpm test\n```\n-->\n')).toEqual([])
+})
