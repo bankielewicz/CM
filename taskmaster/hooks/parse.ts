@@ -404,18 +404,19 @@ const COMMAND_POSITION = /^(?:\s*(?:if|then|else|elif|while|until|do|time|!))*\s
 /** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
 const ENV_PREFIX = /^(?:[A-Za-z_]\w*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])*\s+)+/
 
+/** What a read leaves open at its end: arithmetic, carried to the next line, and a quote or `$[…]`, carried to the next piece of a continued line. */
+type ShellState = { arithmetic: number; quote: string; brackets: number }
+
 /**
  * One shell line's commands, split at `&&`, `||` and `;` and at the parentheses
  * of a subshell, and the terminators of any heredocs it opens. It reads quotes,
  * comments and arithmetic, and little else: this is not a shell parser.
- * `arithmetic` is the depth still open from the lines before, and it returns the
- * depth open after this one.
+ * `from` is what the text before it left open, and it returns what is open after.
  */
-function readShell(text: string, arithmetic: number): { segments: string[]; heredocs: Heredoc[]; arithmetic: number; comment: boolean } {
+function readShell(text: string, from: ShellState): { segments: string[]; heredocs: Heredoc[]; state: ShellState; comment: boolean } {
   const segments: string[] = []
   const heredocs: Heredoc[] = []
-  let quote = ''
-  let brackets = 0
+  let { arithmetic, quote, brackets } = from
   let start = 0
   let end = text.length
   let found: ReadonlyMap<number, number> | undefined
@@ -477,7 +478,7 @@ function readShell(text: string, arithmetic: number): { segments: string[]; here
     }
   }
   segments.push(text.slice(start, end))
-  return { segments, heredocs, arithmetic, comment: end < text.length }
+  return { segments, heredocs, state: { arithmetic, quote, brackets }, comment: end < text.length }
 }
 
 /** Counted from the end, because a regex retries from every backslash in a long run and goes quadratic. */
@@ -490,7 +491,8 @@ function trailingBackslashes(text: string): number {
 function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   const found: VerifyCandidate[] = []
   const seen = new Set<string>()
-  let pending: { text: string; line: number } | undefined
+  // A continued line's pieces so far, each without its backslash, and what the last of them left open.
+  let pending: { pieces: string[]; line: number; state: ShellState } | undefined
   let heredocs: Heredoc[] = []
   let arithmetic = 0
   for (const line of lines) {
@@ -510,18 +512,23 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
       continue
     }
     const text = line.text.trim().replace(/^\$\s+/, '')
-    const joined = pending ? `${pending.text} ${text}` : text
     const at = pending?.line ?? line.number
-    const shell = readShell(joined, arithmetic)
-    // A comment ends at its newline, so a backslash inside one continues nothing. Elsewhere an odd run continues the
-    // line, and an even run is literal backslashes. What this read found is dropped: the joined line is read again whole.
-    if (!shell.comment && trailingBackslashes(joined) % 2 === 1) {
-      pending = { text: joined.slice(0, -1).trim(), line: at }
+    // Only this piece is read to see whether it goes on: a comment in an earlier one would have ended it. A comment ends
+    // at its newline, so a backslash inside one continues nothing. Elsewhere an odd run continues the line, and an even
+    // run is literal backslashes.
+    const piece = readShell(text, pending?.state ?? { arithmetic, quote: '', brackets: 0 })
+    if (!piece.comment && trailingBackslashes(text) % 2 === 1) {
+      pending ??= { pieces: [], line: at, state: piece.state }
+      pending.state = piece.state
+      const kept = text.slice(0, -1).trim()
+      if (kept) pending.pieces.push(kept)
       continue
     }
+    // The joined line is read once, whole, when it ends.
+    const shell = pending ? readShell(`${pending.pieces.join(' ')} ${text}`, { arithmetic, quote: '', brackets: 0 }) : piece
     pending = undefined
     heredocs = shell.heredocs
-    arithmetic = shell.arithmetic
+    arithmetic = shell.state.arithmetic
     for (const segment of shell.segments) {
       const command = segment.trim().replace(ENV_PREFIX, '')
       if (!VERIFY.some(pattern => pattern.test(command))) continue

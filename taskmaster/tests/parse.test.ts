@@ -1068,3 +1068,10 @@ test("a single-quoted delimiter keeps its backslashes, and a quoted parenthesis 
   expect(commandsIn(shell("cat <<'a\\$b'", 'make test', 'a\\$b', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('cat <<$(echo "x)")', 'make test', '$(echo "x)")', 'make lint'))).toEqual(['make lint'])
 })
+
+test('a long run of continued lines takes linear time, with or without heredocs on them', () => {
+  const started = Date.now()
+  expect(commandsIn(shell(...Array<string>(10000).fill('echo a \\'), '&& npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell(...Array<string>(5000).fill('cat <<EOF \\'), '&& npm test'))).toEqual(['npm test'])
+  expect(Date.now() - started).toBeLessThan(1000)
+})
