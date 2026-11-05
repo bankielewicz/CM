@@ -400,7 +400,7 @@ const ENV_PREFIX = /^(?:[A-Za-z_]\w*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])*\s+)+
  * `arithmetic` is the depth still open from the lines before, and it returns the
  * depth open after this one.
  */
-function readShell(text: string, arithmetic: number): { segments: string[]; heredocs: Heredoc[]; arithmetic: number } {
+function readShell(text: string, arithmetic: number): { segments: string[]; heredocs: Heredoc[]; arithmetic: number; comment: boolean } {
   const segments: string[] = []
   const heredocs: Heredoc[] = []
   let quote = ''
@@ -460,7 +460,7 @@ function readShell(text: string, arithmetic: number): { segments: string[]; here
     }
   }
   segments.push(text.slice(start, end))
-  return { segments, heredocs, arithmetic }
+  return { segments, heredocs, arithmetic, comment: end < text.length }
 }
 
 /** Counted from the end, because a regex retries from every backslash in a long run and goes quadratic. */
@@ -495,13 +495,14 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
     const text = line.text.trim().replace(/^\$\s+/, '')
     const joined = pending ? `${pending.text} ${text}` : text
     const at = pending?.line ?? line.number
-    // An even run is literal backslashes, so only an odd one continues the line.
-    if (trailingBackslashes(joined) % 2 === 1) {
+    const shell = readShell(joined, arithmetic)
+    // A comment ends at its newline, so a backslash inside one continues nothing. Elsewhere an odd run continues the
+    // line, and an even run is literal backslashes. What this read found is dropped: the joined line is read again whole.
+    if (!shell.comment && trailingBackslashes(joined) % 2 === 1) {
       pending = { text: joined.slice(0, -1).trim(), line: at }
       continue
     }
     pending = undefined
-    const shell = readShell(joined, arithmetic)
     heredocs = shell.heredocs
     arithmetic = shell.arithmetic
     for (const segment of shell.segments) {

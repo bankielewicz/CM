@@ -1012,3 +1012,11 @@ test('a setext underline closes only a paragraph at its own level; under an item
   expect(titles('1. a\n   ===\ntext\n2. b\n')).toEqual(['a'])
   expect(rulesIn('Head\n===\n    MUST x\n')).toEqual([])
 })
+
+test('a backslash ending a comment continues nothing, because the comment ends at its newline', () => {
+  expect(commandsIn(shell('# note \\', 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('echo \\', '# note \\', 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('echo "a # b" \\', '&& npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('make lint \\', '# comment', 'npm test'))).toEqual(['make lint', 'npm test'])
+  expect(commandsIn(shell('cat <<EOF \\', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+})
