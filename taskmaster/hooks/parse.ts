@@ -116,7 +116,10 @@ function classify(lines: { text: string; number: number }[]): Line[] {
   return lines.map(line => {
     // A fence inside a blockquote runs while its lines keep the quote's markers. A line without them ends the quote, and the fence with it.
     const quoted = fence && fence.quotes > 0 ? unquote(line.text, fence.quotes) : undefined
-    if (fence && quoted && quoted.depth < fence.quotes) fence = undefined
+    if (fence && quoted && quoted.depth < fence.quotes) {
+      fence = undefined
+      codeMayStart = true
+    }
     if (!fence) {
       const opening = unquote(line.text, Number.POSITIVE_INFINITY)
       const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)(.*)$/.exec(opening.text)
@@ -137,7 +140,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       const underline = afterText && SETEXT.test(opening.text) && opening.depth === paragraphDepth && (listIndent === undefined || columns(/^\s*/.exec(line.text)?.[0] ?? '') >= contentIndent)
       afterText = !inHtml && !underline && isParagraph(opening.text)
       if (afterText) paragraphDepth = opening.depth
-      // Indented code can start anywhere but in a paragraph. A fence's close leaves it off: a line straight after one is read as text.
+      // Indented code can start anywhere but in a paragraph, and a fence's close is no paragraph either.
       codeMayStart = !afterText
       // `* * *` and `- - -` have a list marker's shape, and are thematic breaks.
       const item = THEMATIC_BREAK.test(line.text) ? null : ANY_ITEM.exec(line.text)
@@ -156,6 +159,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
     const trimmed = text.trim()
     if (trimmed.startsWith(current.marker[0] ?? '`') && /^(`{3,}|~{3,})$/.test(trimmed) && trimmed.length >= current.marker.length) {
       fence = undefined
+      codeMayStart = true
       return { ...line, code: { lang: '', fence: true } }
     }
     return { ...line, text, code: { lang: current.lang, indent: current.indent } }
