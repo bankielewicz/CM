@@ -154,7 +154,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       const inHtml = htmlCloser !== undefined
       // Inside a quote, indent counts from its markers. A list outside the quote doesn't move that.
       const deep = opening.depth > 0 ? quotedIndent(line.text) >= 4 : listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : indent >= contentIndent + 4
-      if (!blank && !inHtml && codeMayStart && deep) {
+      if (!inHtml && codeMayStart && deep) {
         if (opening.depth > 0 && listIndent !== undefined && endsList(line, listIndent)) listIndent = undefined
         return { ...line, code: { lang: INDENTED } }
       }

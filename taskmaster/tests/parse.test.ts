@@ -1204,3 +1204,9 @@ test("a > line inside an unquoted fence is the code's own, and a quoted line thr
   expect(commandsIn('1. [ ] x\n   ```bash\n   npm test\n> q\n   npm test\n')).toEqual(['npm test'])
   expect(rulesIn('> q\n>\n>    You MUST keep this.\n')).toEqual(['MUST'])
 })
+
+test('a group closed in one case clause leaves the next clause its pattern, and a quoted fence outside any item runs on', () => {
+  expect(commandsIn(shell('case x in a) (npm test);; b) make lint;; esac'))).toEqual(['npm test', 'make lint'])
+  expect(commandsIn('- a\n\npara\n   > ```bash\n> npm test\n> ```\n')).toEqual(['npm test'])
+  expect(commandsIn('1. a\n> ```bash\n> npm test\n> ```\n')).toEqual(['npm test'])
+})
