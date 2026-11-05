@@ -133,7 +133,6 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       // A backtick fence's opening line can't hold another backtick: that's inline code.
       if (open?.[1] && !(open[1].startsWith('`') && open[3]?.includes('`'))) {
         fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase(), indent: opening.text.search(/\S/), quotes: opening.depth }
-        codeMayStart = false
         afterText = false
         return { ...line, code: { lang: '', fence: true } }
       }

@@ -1028,6 +1028,7 @@ test('<< inside $[…] is a shift, as in $((…)), while a bare [ is the test co
   expect(commandsIn(shell('echo $[ (1<<2) ] && npm test'))).toEqual(['npm test'])
   expect(commandsIn(shell('[ -f x ] && npm test'))).toEqual(['npm test'])
   expect(commandsIn(shell('echo ${a[1]} <<EOF', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('echo [ ; npm test'))).toEqual(['npm test'])
 })
 
 
@@ -1043,6 +1044,7 @@ test('an HTML block of types 1 to 5 runs to its closer past blank lines when one
 test('a block tag still ends at a blank line, closer or not, and a closer before the opener does not count', () => {
   expect(titles('<div>\n\n1. a\n</div>\n')).toEqual(['a'])
   expect(titles('-->\n<!-- c\n\n1. a\n')).toEqual(['a'])
+  expect(titles('-->\n<!-- c\n\n1. a\n-->\n1. b\n')).toEqual(['b'])
 })
 
 test('a document of unclosed or late-closed HTML openers takes linear time', () => {
