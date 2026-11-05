@@ -398,25 +398,44 @@ function closers(text: string): ReadonlyMap<number, number> {
   return found
 }
 
-/** What may stand before a `(` that opens a subshell: nothing, or the words bash lets a compound command follow. */
-const COMMAND_POSITION = /^(?:\s*(?:if|then|else|elif|while|until|do|time|!))*\s*$/
+/** The words after which a command may still start, as after `if` or `{`. */
+const KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'while', 'until', 'do', 'time', '!', '{'])
 
 /** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
 const ENV_PREFIX = /^(?:[A-Za-z_]\w*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])*\s+)+/
 
-/** What a read leaves open at its end: arithmetic, carried to the next line, and a quote or `$[…]`, carried to the next piece of a continued line. */
-type ShellState = { arithmetic: number; quote: string; brackets: number }
+/**
+ * A group whose commands are read: a subshell, a substitution where a command starts or that runs on to later lines,
+ * or a case statement, in its subject, a pattern, or the commands after one. One left open is carried to the next line.
+ */
+type Group = { readonly kind: 'subshell' | 'substitution' } | { readonly kind: 'case'; readonly part: 'subject' | 'pattern' | 'body' }
+
+/** The open groups, innermost first. Nothing changes one in place, so a line hands them on without a copy. */
+type Groups = { readonly group: Group; readonly below: Groups } | undefined
+
+/**
+ * What a read leaves open at its end: arithmetic and groups, carried to the next line, and a quote or `$[…]`, carried
+ * only to the next piece of a continued line.
+ */
+type ShellState = { arithmetic: number; quote: string; brackets: number; groups: Groups }
+
+const CLOSED: ShellState = { arithmetic: 0, quote: '', brackets: 0, groups: undefined }
 
 /**
  * One shell line's commands, split at `&&`, `||` and `;` and at the parentheses
  * of a subshell, and the terminators of any heredocs it opens. It reads quotes,
  * comments and arithmetic, and little else: this is not a shell parser.
  * `from` is what the text before it left open, and it returns what is open after.
+ *
+ * A `)` ends a command only when it closes a group: a subshell or substitution
+ * whose `(` `closers()` pairs with it, one carried from an earlier line, or a case
+ * pattern. Anywhere else it's a character. A substitution closed inside a word,
+ * as in `echo $(npm test)`, is part of that word: nothing in it is split or read.
  */
 function readShell(text: string, from: ShellState): { segments: string[]; heredocs: Heredoc[]; state: ShellState; comment: boolean } {
   const segments: string[] = []
   const heredocs: Heredoc[] = []
-  let { arithmetic, quote, brackets } = from
+  let { arithmetic, quote, brackets, groups } = from
   let start = 0
   let end = text.length
   let found: ReadonlyMap<number, number> | undefined
@@ -428,61 +447,155 @@ function readShell(text: string, from: ShellState): { segments: string[]; heredo
     const inner = closes().get(at + 1)
     return inner === undefined || text[inner + 1] === ')'
   }
-  // The closing parentheses of the groups open here, innermost last, and those that end a command because one ended inside their group.
-  const groups: number[] = []
-  const ends = new Set<number>()
-  // The segment start at which a `(` last found more than keywords before it. That `(` is then part of the text since
-  // the start, so no later one can find only keywords until a cut moves the start: the test runs once per segment.
-  let wordsSince = -1
+  // The groups opened here, by where their `)` is. The innermost open group decides what a `)` ends, so a pattern's `)`
+  // that `closers()` pairs with a subshell's `(` still ends the pattern.
+  const opened = new Set<number>()
+  // The closer of a substitution or backtick inside a word: up to it nothing is syntax but quotes, comments, heredocs and arithmetic.
+  let sealed = -1
+  // Where the word being read began, and whether a command may start where it did.
+  let word = -1
+  const top = (): Group | undefined => groups?.group
+  const push = (group: Group): void => {
+    groups = { group, below: groups }
+  }
+  const pop = (): void => {
+    groups = groups?.below
+  }
+  const inPattern = (): boolean => {
+    const group = top()
+    return group?.kind === 'case' && group.part === 'pattern'
+  }
+  let position = !inPattern()
   const cut = (at: number, next: number): void => {
     segments.push(text.slice(start, at))
     start = next
-    const group = groups[groups.length - 1]
-    if (group !== undefined) ends.add(group)
+  }
+  const endWord = (at: number): void => {
+    if (word === -1) return
+    const read = text.slice(word, at)
+    word = -1
+    const group = top()
+    if (group?.kind === 'case' && group.part === 'subject') {
+      if (read === 'in') {
+        pop()
+        push({ kind: 'case', part: 'pattern' })
+      }
+    } else if (group?.kind === 'case' && read === 'esac' && (position || group.part === 'pattern')) {
+      pop()
+      position = false
+    } else if (position && !inPattern()) {
+      if (read === 'case') push({ kind: 'case', part: 'subject' })
+      position = KEYWORDS.has(read)
+    }
   }
   for (let at = 0; at < end; at += 1) {
-    const char = text[at]
-    if (char === '\\' && quote !== "'") at += 1
-    else if (quote) quote = char === quote ? '' : quote
-    else if (char === '"' || char === "'") quote = char
-    else if (arithmetic > 0) arithmetic += char === '(' ? 1 : char === ')' ? -1 : 0
+    const char = text[at] as string
+    if (char === '\\' && quote !== "'") {
+      if (word === -1) word = at
+      at += 1
+    } else if (quote) quote = char === quote ? '' : quote
+    else if (char === '"' || char === "'") {
+      if (word === -1) word = at
+      quote = char
+    } else if (arithmetic > 0) arithmetic += char === '(' ? 1 : char === ')' ? -1 : 0
     else if (brackets > 0) brackets += char === '[' ? 1 : char === ']' ? -1 : 0
+    else if (at === sealed) sealed = -1
     else if (text.startsWith('((', at) && isArithmetic(at)) {
       // Inside $((…)) or ((…)), << is a shift, so nothing there can open a heredoc.
+      if (word === -1) word = at
       arithmetic = 2
       at += 1
     } else if (text.startsWith('$[', at)) {
       // `$[…]` is bash's older arithmetic, so << there is a shift too. A bare `[` is the test command, and `${a[1]}` an index.
+      if (word === -1) word = at
       brackets = 1
       at += 1
-    } else if (char === '(') {
-      // `$(`, `<(` and `>(` substitute into the command around them. A `(` where a command may start opens a subshell, and
-      // neither of its parentheses is part of what runs inside. Anywhere else, as in a diagram, it's a character like any other.
-      const close = closes().get(at)
-      const substitution = /[$<>]/.test(text[at - 1] ?? '')
-      const subshell = !substitution && wordsSince !== start && COMMAND_POSITION.test(text.slice(start, at))
-      if (!substitution && !subshell) wordsSince = start
-      if (subshell) {
-        cut(at, at + 1)
-        if (close !== undefined) ends.add(close)
-      }
-      if ((substitution || subshell) && close !== undefined) groups.push(close)
-    } else if (char === ')') {
-      if (groups[groups.length - 1] === at) groups.pop()
-      if (ends.has(at) || !isClosed(at)) cut(at, at + 1)
     } else if (char === '#' && (at === 0 || /\s/.test(text[at - 1] as string))) end = at
-    else if (char === ';' || text.startsWith('&&', at) || text.startsWith('||', at)) {
-      cut(at, at + (char === ';' ? 1 : 2))
-      at = start - 1
-    } else if (text.startsWith('<<', at)) {
+    else if (text.startsWith('<<', at)) {
+      endWord(at)
       const heredoc = readHeredoc(text, at, closes)
       if (heredoc) heredocs.push(heredoc)
       // The word is bash's to take literally, so none of its `;`, `&&` or `((` is read as syntax.
       at = heredoc ? heredoc.end - 1 : at + 1
-    }
+    } else if (at < sealed) continue
+    else if (text.startsWith('${', at) && closes().has(at + 1)) {
+      // A parameter's `${…}` is one piece of its word, whatever `)` or `;` it holds.
+      if (word === -1) word = at
+      at = closes().get(at + 1) as number
+    } else if (char === '`' && closes().has(at)) {
+      if (word === -1) word = at
+      sealed = closes().get(at) as number
+    } else if (char === '(') {
+      const close = closes().get(at)
+      const before = text[at - 1] ?? ''
+      if (/[$<>]/.test(before)) {
+        // `$(`, `<(` and `>(` substitute into the command around them. Where a command starts, or run on to later
+        // lines, their commands are read; closed inside a word, they're part of it.
+        const commandStart = before === '$' && position && word === at - 1
+        if (close !== undefined && !commandStart) sealed = close
+        else {
+          if (commandStart) cut(at - 1, at + 1)
+          push({ kind: 'substitution' })
+          if (close !== undefined) opened.add(close)
+          word = -1
+          position = true
+        }
+      } else if (inPattern()) {
+        // A case pattern's own opening parenthesis: its closer ends the pattern.
+        endWord(at)
+        if (close !== undefined) opened.add(close)
+      } else {
+        endWord(at)
+        // A `(` where a command may start opens a subshell, and neither of its parentheses is part of what runs inside.
+        // Anywhere else, as in a diagram, it's a character like any other.
+        if (position) {
+          cut(at, at + 1)
+          push({ kind: 'subshell' })
+          if (close !== undefined) opened.add(close)
+        }
+      }
+    } else if (char === ')') {
+      endWord(at)
+      const group = top()
+      // A `)` that closes a `(` which opened nothing, as in a diagram, ends nothing either.
+      if (group === undefined || (!opened.has(at) && isClosed(at))) continue
+      if (group.kind === 'case') {
+        if (group.part !== 'pattern') continue
+        cut(at, at + 1)
+        pop()
+        push({ kind: 'case', part: 'body' })
+        position = true
+      } else {
+        pop()
+        // What follows a substitution's `)` is the rest of the word it sat in, so it keeps the `)` and reads as no command.
+        cut(at, group.kind === 'subshell' ? at + 1 : at)
+        position = false
+      }
+    } else if (char === ';' || text.startsWith('&&', at) || text.startsWith('||', at)) {
+      endWord(at)
+      const group = top()
+      // `;;`, `;&` and `;;&` end a case's commands, and a pattern comes next.
+      const clause = group?.kind === 'case' && group.part === 'body' ? (/^;(;&?|&)/.exec(text.slice(at, at + 3))?.[0].length ?? 0) : 0
+      if (clause > 0) {
+        pop()
+        push({ kind: 'case', part: 'pattern' })
+      }
+      cut(at, at + (clause || (char === ';' ? 1 : 2)))
+      position = !inPattern()
+      at = start - 1
+    } else if (char === '|' || char === '&') {
+      // A command may start after a pipe or a background `&`. A `(` straight after a redirection's `>&` is no shell at all.
+      endWord(at)
+      position = !inPattern()
+    } else if (/[\s<>]/.test(char)) endWord(at)
+    else if (word === -1) word = at
   }
+  endWord(end)
+  // `case` with no `in` on its line opens nothing, so a stray word in prose can't make `)` end commands.
+  const last = top()
+  if (last?.kind === 'case' && last.part === 'subject') pop()
   segments.push(text.slice(start, end))
-  return { segments, heredocs, state: { arithmetic, quote, brackets }, comment: end < text.length }
+  return { segments, heredocs, state: { arithmetic, quote, brackets, groups }, comment: end < text.length }
 }
 
 /** Counted from the end, because a regex retries from every backslash in a long run and goes quadratic. */
@@ -498,14 +611,15 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   // A continued line's pieces so far, each without its backslash, and what the last of them left open.
   let pending: { pieces: string[]; line: number; state: ShellState } | undefined
   let heredocs: Heredoc[] = []
-  let arithmetic = 0
+  // What the lines before left open: arithmetic and groups, never a quote or `$[…]`.
+  let open = CLOSED
   for (const line of lines) {
     const fence = line.code?.fence === true
     if (fence) {
       // A code block's end ends whatever was still open in it.
       pending = undefined
       heredocs = []
-      arithmetic = 0
+      open = CLOSED
     }
     if (!line.code || !SHELLS.has(line.code.lang) || fence) continue
     const heredoc = heredocs[0]
@@ -520,7 +634,7 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
     // Only this piece is read to see whether it goes on: a comment in an earlier one would have ended it. A comment ends
     // at its newline, so a backslash inside one continues nothing. Elsewhere an odd run continues the line, and an even
     // run is literal backslashes.
-    const piece = readShell(text, pending?.state ?? { arithmetic, quote: '', brackets: 0 })
+    const piece = readShell(text, pending?.state ?? open)
     if (!piece.comment && trailingBackslashes(text) % 2 === 1) {
       pending ??= { pieces: [], line: at, state: piece.state }
       pending.state = piece.state
@@ -529,10 +643,10 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
       continue
     }
     // The joined line is read once, whole, when it ends.
-    const shell = pending ? readShell(`${pending.pieces.join(' ')} ${text}`, { arithmetic, quote: '', brackets: 0 }) : piece
+    const shell = pending ? readShell(`${pending.pieces.join(' ')} ${text}`, open) : piece
     pending = undefined
     heredocs = shell.heredocs
-    arithmetic = shell.state.arithmetic
+    open = { ...shell.state, quote: '', brackets: 0 }
     for (const segment of shell.segments) {
       const command = segment.trim().replace(ENV_PREFIX, '')
       if (!VERIFY.some(pattern => pattern.test(command))) continue

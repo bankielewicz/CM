@@ -1081,3 +1081,50 @@ test('a line of many parentheses where no command may start takes linear time', 
   expect(commandsIn(shell(`a;${' '.repeat(40000)}x${' ('.repeat(40000)}; npm test`))).toEqual(['npm test'])
   expect(Date.now() - started).toBeLessThan(1000)
 })
+
+test('a ) ends a command only when a subshell or case pattern opened it, so one inside ${…} or backticks, or closing nothing, is a character like any other', () => {
+  expect(commandsIn(shell('npm test -- --grep ${pattern:-foo)}'))).toEqual(['npm test -- --grep ${pattern:-foo)}'])
+  expect(commandsIn(shell('echo ${message:-) npm test}'))).toEqual([])
+  expect(commandsIn('```\n1) npm test\n2) make lint\n```\n')).toEqual([])
+  expect(commandsIn(shell('done :) npm test'))).toEqual([])
+  expect(commandsIn(shell('echo a ) npm test'))).toEqual([])
+  expect(commandsIn(shell('echo `a) make lint`'))).toEqual([])
+  expect(commandsIn(shell('(cd a', 'npm test ${x:-)})'))).toEqual(['npm test ${x:-)}'])
+})
+
+test("a subshell, substitution or case left open is carried to later lines, and what follows a substitution's closing ) is no command", () => {
+  expect(commandsIn(shell('echo $(', 'a', ') make lint'))).toEqual([])
+  expect(commandsIn(shell('x=$(cd a', 'npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('(cd a', '(cd b', 'npm test)', 'make lint)'))).toEqual(['npm test', 'make lint'])
+  expect(commandsIn(shell('case "$1" in', '  test) npm test ;;', '  lint) make lint ;;', 'esac'))).toEqual(['npm test', 'make lint'])
+  expect(commandsIn(shell('case x in', '  (x|y) npm test ;;', 'esac'))).toEqual(['npm test'])
+  expect(commandsIn(shell('case x in x) a;; esac', '1) npm test'))).toEqual([])
+  expect(commandsIn(shell('case studies', '1) npm test'))).toEqual([])
+})
+
+test('a substitution closed inside a word is part of that word, so nothing in it is split or read, while one where a command starts is read', () => {
+  expect(commandsIn(shell('echo $(cd a; pwd) make lint'))).toEqual([])
+  expect(commandsIn(shell('echo $(a; b) npm test'))).toEqual([])
+  expect(commandsIn(shell('echo $(a; npm test)'))).toEqual([])
+  expect(commandsIn(shell('x=$(cd a; npm test)'))).toEqual([])
+  expect(commandsIn(shell('$(npm test) && make lint'))).toEqual(['npm test', 'make lint'])
+  expect(commandsIn(shell('if $(npm test); then echo ok; fi'))).toEqual(['npm test'])
+})
+
+test('a subshell may start after |, & or {, as after ; or &&', () => {
+  expect(commandsIn(shell('echo hi | (cd a; npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('echo hi & (cd a; npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('true & (npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('{ (npm test); }'))).toEqual(['npm test'])
+})
+
+test("a case's commands end at ;;, ;& or ;;&, and the case ends at esac after any of them or after ;", () => {
+  expect(commandsIn(shell('case x in a) npm test ;& b) make lint ;;& esac', '1) go vet'))).toEqual(['npm test', 'make lint'])
+  expect(commandsIn(shell('case x in a) npm test; esac', '1) go vet'))).toEqual(['npm test'])
+})
+
+test('a long run of lines that each leave a group open takes linear time', () => {
+  const started = Date.now()
+  expect(commandsIn(shell(...Array<string>(20000).fill('('), `npm test${')'.repeat(20000)}`))).toEqual(['npm test'])
+  expect(Date.now() - started).toBeLessThan(1000)
+})
