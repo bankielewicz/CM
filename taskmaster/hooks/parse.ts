@@ -352,14 +352,18 @@ function closers(text: string): ReadonlyMap<number, number> {
   return found
 }
 
+/** What may stand before a `(` that opens a subshell: nothing, or the words bash lets a compound command follow. */
+const COMMAND_POSITION = /^(?:\s*(?:if|then|else|elif|while|until|do|time|!))*\s*$/
+
 /** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
 const ENV_PREFIX = /^(?:[A-Za-z_]\w*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])*\s+)+/
 
 /**
- * One shell line's `&&`, `||` and `;` segments, and the terminators of any
- * heredocs it opens. It reads quotes, comments and arithmetic, and little else:
- * this is not a shell parser. `arithmetic` is the depth still open from the lines
- * before, and it returns the depth open after this one.
+ * One shell line's commands, split at `&&`, `||` and `;` and at the parentheses
+ * of a subshell, and the terminators of any heredocs it opens. It reads quotes,
+ * comments and arithmetic, and little else: this is not a shell parser.
+ * `arithmetic` is the depth still open from the lines before, and it returns the
+ * depth open after this one.
  */
 function readShell(text: string, arithmetic: number): { segments: string[]; heredocs: Heredoc[]; arithmetic: number } {
   const segments: string[] = []
@@ -369,20 +373,49 @@ function readShell(text: string, arithmetic: number): { segments: string[]; here
   let end = text.length
   let found: ReadonlyMap<number, number> | undefined
   const closes = (): ReadonlyMap<number, number> => (found ??= closers(text))
+  let closed: ReadonlySet<number> | undefined
+  const isClosed = (at: number): boolean => (closed ??= new Set(closes().values())).has(at)
+  // `((…))` is arithmetic when its inner parenthesis closes right before its outer one, or not on this line. `((a); b)` is two subshells.
+  const isArithmetic = (at: number): boolean => {
+    const inner = closes().get(at + 1)
+    return inner === undefined || text[inner + 1] === ')'
+  }
+  // The closing parentheses of the groups open here, innermost last, and those that end a command because one ended inside their group.
+  const groups: number[] = []
+  const ends = new Set<number>()
+  const cut = (at: number, next: number): void => {
+    segments.push(text.slice(start, at))
+    start = next
+    const group = groups[groups.length - 1]
+    if (group !== undefined) ends.add(group)
+  }
   for (let at = 0; at < end; at += 1) {
     const char = text[at]
     if (char === '\\' && quote !== "'") at += 1
     else if (quote) quote = char === quote ? '' : quote
     else if (char === '"' || char === "'") quote = char
     else if (arithmetic > 0) arithmetic += char === '(' ? 1 : char === ')' ? -1 : 0
-    else if (text.startsWith('((', at)) {
+    else if (text.startsWith('((', at) && isArithmetic(at)) {
       // Inside $((…)) or ((…)), << is a shift, so nothing there can open a heredoc.
       arithmetic = 2
       at += 1
+    } else if (char === '(') {
+      // `$(`, `<(` and `>(` substitute into the command around them. A `(` where a command may start opens a subshell, and
+      // neither of its parentheses is part of what runs inside. Anywhere else, as in a diagram, it's a character like any other.
+      const close = closes().get(at)
+      const substitution = /[$<>]/.test(text[at - 1] ?? '')
+      const subshell = !substitution && COMMAND_POSITION.test(text.slice(start, at))
+      if (subshell) {
+        cut(at, at + 1)
+        if (close !== undefined) ends.add(close)
+      }
+      if ((substitution || subshell) && close !== undefined) groups.push(close)
+    } else if (char === ')') {
+      if (groups[groups.length - 1] === at) groups.pop()
+      if (ends.has(at) || !isClosed(at)) cut(at, at + 1)
     } else if (char === '#' && (at === 0 || /\s/.test(text[at - 1] as string))) end = at
     else if (char === ';' || text.startsWith('&&', at) || text.startsWith('||', at)) {
-      segments.push(text.slice(start, at))
-      start = at + (char === ';' ? 1 : 2)
+      cut(at, at + (char === ';' ? 1 : 2))
       at = start - 1
     } else if (text.startsWith('<<', at)) {
       const heredoc = readHeredoc(text, at, closes)

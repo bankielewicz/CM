@@ -905,11 +905,13 @@ test("a heredoc delimiter's own metacharacters are not read as shell syntax, whi
   expect(commandsIn(shell('cat <<$(x) && npm test', 'body', '$(x)', 'make lint'))).toEqual(['npm test', 'make lint'])
 })
 
+
 test('an empty quoted delimiter opens a heredoc that ends at the first empty line, as bash reads it', () => {
   expect(commandsIn(shell("cat <<''", 'npm test', '', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('cat <<""', 'npm test', '', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell("cat <<''", 'npm test', 'EOF'))).toEqual([])
 })
+
 
 test('a backslash inside a double-quoted delimiter escapes the next character, and inside single quotes is literal', () => {
   expect(commandsIn(shell('cat <<"a\\"b"', 'make test', 'a"b', 'make lint'))).toEqual(['make lint'])
@@ -919,3 +921,36 @@ test('a backslash inside a double-quoted delimiter escapes the next character, a
   expect(commandsIn(shell("cat <<'a\\b'", 'make test', 'a\\b', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('cat <<`a\\`b`', 'make test', '`a\\`b`', 'make lint'))).toEqual(['make lint'])
 })
+
+
+test('parentheses that do not close together are subshells, not arithmetic, so the commands in and after them are read', () => {
+  expect(commandsIn(shell('((true); npm test; )'))).toEqual(['npm test'])
+  expect(commandsIn(shell('((cd a); npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('((cd a) && npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('$((cd a); npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('(((1)); npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('((1)) ; make lint'))).toEqual(['make lint'])
+})
+
+
+test("a subshell's parentheses are not part of its commands, while a substitution's are", () => {
+  expect(commandsIn(shell('(cd a; npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('(npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('( npm test ) && make lint'))).toEqual(['npm test', 'make lint'])
+  expect(commandsIn(shell('(cd a', 'npm test)'))).toEqual(['npm test'])
+  expect(commandsIn(shell('case x in x) npm test;; esac'))).toEqual(['npm test'])
+  expect(commandsIn(shell('echo $(npm test)'))).toEqual([])
+  expect(commandsIn(shell('npm test $(cat x) && make lint'))).toEqual(['npm test $(cat x)', 'make lint'])
+  expect(commandsIn(shell('diff <(npm test) <(make lint)'))).toEqual([])
+  expect(commandsIn(shell('npm test -- --grep "(a)"'))).toEqual(['npm test -- --grep "(a)"'])
+})
+
+
+test('a parenthesis where no command may start is a character like any other, as in a diagram in an untagged block', () => {
+  expect(commandsIn('```\n├─ Runs formatters (ruff format, biome, shfmt)\n```\n')).toEqual([])
+  expect(commandsIn(shell('echo (npm test)'))).toEqual([])
+  expect(commandsIn(shell('if (npm test); then echo ok; fi'))).toEqual(['npm test'])
+  expect(commandsIn(shell('while ! (make lint); do sleep 1; done'))).toEqual(['make lint'])
+  expect(commandsIn(shell('true && (go vet)'))).toEqual(['go vet'])
+})
+
