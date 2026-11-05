@@ -1052,3 +1052,15 @@ test('a document of unclosed or late-closed HTML openers takes linear time', () 
   expect(parseSkill(skill(`${'<!-- x\n\n'.repeat(10000)}1. a\n`), {}).steps.map(step => step.title)).toEqual(['a'])
   expect(Date.now() - started).toBeLessThan(1000)
 })
+
+test('mutants the earlier checks let through: a spaced break before an indented list, a marker inside a block tag, and a tag that closes a raw block', () => {
+  expect(titles('- - -\n  1. n\n')).toEqual(['n'])
+  expect(rulesIn('<div>\n1. a\n\n      MUST six\n')).toEqual([])
+  expect(rulesIn('<pre>\nx\n</pre>\n    You MUST not see code.\n')).toEqual([])
+})
+
+test("a single-quoted delimiter keeps its backslashes, and a quoted parenthesis inside a substitution doesn't close it", () => {
+  expect(commandsIn(shell("cat <<'a\\\"b'", 'make test', 'a\\"b', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell("cat <<'a\\$b'", 'make test', 'a\\$b', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$(echo "x)")', 'make test', '$(echo "x)")', 'make lint'))).toEqual(['make lint'])
+})
