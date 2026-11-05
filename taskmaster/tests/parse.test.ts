@@ -1160,3 +1160,12 @@ test("a quoted line four columns past its marker's space is indented code where 
   expect(titles('1. a\n\n>     MUST quoted four\n2. b\n')).toEqual(['a'])
   expect(titles('- [ ] c\n\n>     x\n  1. n\n')).toEqual(['n'])
 })
+
+test("a fence in a quote inside a list item ends at a quote marker left of the item's content, which starts a quote of its own", () => {
+  expect(rulesIn('1. [ ] x\n   > ```\n> MUST quoted\n')).toEqual(['MUST'])
+  expect(commandsIn('- a\n   > ```\n> npm test\n')).toEqual([])
+  expect(titles('2. b\n   > ```\n> ```bash\n>\n1. a\n')).toEqual(['b'])
+  expect(titles('- bullet\n   > ```\n> # H\n  1. n\n')).toEqual(['n'])
+  expect(commandsIn('   > ```bash\n> npm test\n> ```\n')).toEqual(['npm test'])
+  expect(commandsIn('1. a\n   > ```bash\n   > npm test\n   > ```\n')).toEqual(['npm test'])
+})

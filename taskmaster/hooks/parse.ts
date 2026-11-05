@@ -50,8 +50,11 @@ function columns(text: string): number {
  */
 type Line = { text: string; number: number; code?: { lang: string; fence?: true; indent?: number }; inList?: boolean; afterText?: boolean; inHtml?: boolean }
 
-/** An open code fence. `quotes`: the blockquote markers before it, which its lines keep. */
-type Fence = { marker: string; lang: string; indent: number; quotes: number }
+/**
+ * An open code fence. `quotes`: the blockquote markers before it, which its lines keep. `item`: for a quote inside a list
+ * item, the item's content column, left of which a quote marker belongs to a quote of its own.
+ */
+type Fence = { marker: string; lang: string; indent: number; quotes: number; item?: number }
 
 /** The text after up to `depth` blockquote markers, and how many came off. */
 function unquote(text: string, depth: number): { text: string; depth: number } {
@@ -130,7 +133,8 @@ function classify(lines: { text: string; number: number }[]): Line[] {
   return lines.map((line, index) => {
     // A fence inside a blockquote runs while its lines keep the quote's markers. A line without them ends the quote, and the fence with it.
     const quoted = fence && fence.quotes > 0 ? unquote(line.text, fence.quotes) : undefined
-    if (fence && quoted && quoted.depth < fence.quotes) {
+    const indent = columns(/^\s*/.exec(line.text)?.[0] ?? '')
+    if (fence && quoted && (quoted.depth < fence.quotes || indent < (fence.item ?? 0))) {
       fence = undefined
       codeMayStart = true
     }
@@ -139,7 +143,8 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)(.*)$/.exec(opening.text)
       // A backtick fence's opening line can't hold another backtick: that's inline code. Inside an HTML block a fence is HTML.
       if (open?.[1] && htmlCloser === undefined && !(open[1].startsWith('`') && open[3]?.includes('`'))) {
-        fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase(), indent: opening.text.search(/\S/), quotes: opening.depth }
+        const item = opening.depth > 0 && listIndent !== undefined && indent >= contentIndent ? { item: contentIndent } : {}
+        fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase(), indent: opening.text.search(/\S/), quotes: opening.depth, ...item }
         // A quote's marker can end a list, whatever the quote holds.
         if (opening.depth > 0 && listIndent !== undefined && endsList(line, listIndent)) listIndent = undefined
         afterText = false
@@ -147,7 +152,6 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       }
       const blank = line.text.trim() === ''
       const inHtml = htmlCloser !== undefined
-      const indent = columns(/^\s*/.exec(line.text)?.[0] ?? '')
       // Inside a quote, indent counts from its markers. A list outside the quote doesn't move that.
       const deep = opening.depth > 0 ? quotedIndent(line.text) >= 4 : listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : indent >= contentIndent + 4
       if (opening.text.trim() !== '' && !inHtml && codeMayStart && deep) {
