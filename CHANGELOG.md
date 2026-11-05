@@ -26,3 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Removed
 
 - Removed the Phase 0 spike (`spike/taskmaster-spike/`) and its coverage chart, now that Gate A has passed. The result is in the plan's §10.1, and the spike's files are in git history at [`d46b356`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike). Its `coverage-exempt.json` entry stays until the owner removes it (P1.0b step 2), and the gate ignores it until then.
+
+### Fixed
+
+- Fixed seven cases in the deterministic skill parse (P1.2): a line indented four spaces past a list item's content read as text, so a `MUST` in that code became a rule, a list marker inside an HTML block read as a list item, heredoc delimiters holding `$(…)` lost the commands after them, a line wrapped in triple backticks hid the rest of the skill, heredocs with delimiters like `EOF-JSON` lost the commands after them, a line ending in two backslashes swallowed the next command, a paragraph after an indented list hid the workflow that followed, and code spans such as `__init__.py` lost their contents in step titles.

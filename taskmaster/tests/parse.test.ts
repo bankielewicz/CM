@@ -533,3 +533,368 @@ test('a plain bullet inside a checklist does not end it, and its command stays w
 test('a plain bullet still ends a numbered list', () => {
   expect(titles('1. a\n- plain\n2. b\n')).toEqual(['a'])
 })
+
+// ------------------------------------------------------------ Codex's comments after PR #9 merged
+
+test('a line wrapped in triple backticks is inline code, so what follows it still counts', () => {
+  const parsed = parseSkill(skill('```npm test```\n\n## Step 1: Implement\n\nYou MUST add a test.\n'), {})
+  expect(parsed.steps.map(step => step.title)).toEqual(['Implement'])
+  expect(parsed.rules.map(rule => rule.text)).toEqual(['You MUST add a test.'])
+  expect(parsed.verifyCandidates).toEqual([])
+  expect(titles('````x````\n1. Step\n')).toEqual(['Step'])
+})
+
+test("a backtick fence's opening line can't hold another backtick, while a tilde fence's can", () => {
+  expect(titles('``` a`b\n\n1. Step\n')).toEqual(['Step'])
+  expect(titles('~~~ a`b\n1. code\n~~~\n\n1. Real\n')).toEqual(['Real'])
+})
+
+test('a line that only looks like a fence, inside a code block, leaves an open heredoc alone', () => {
+  expect(commandsIn(shell('cat <<EOF', '```x```', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn('~~~bash\ncat <<EOF\n```\nnpm test\nEOF\nmake lint\n~~~\n')).toEqual(['make lint'])
+})
+
+test('a fence line is never read as a command, opening or closing', () => {
+  expect(commandsIn('``` ; npm test\nls\n```\n')).toEqual([])
+  expect(commandsIn(shell('cargo test \\'))).toEqual([])
+})
+
+test('a heredoc delimiter is the whole word, with its quotes removed', () => {
+  const spellings: [string, string][] = [
+    ["<<'EOF-JSON'", 'EOF-JSON'],
+    ['<<"END OF"', 'END OF'],
+    ["<<'123'", '123'],
+    ['<<EOF-JSON', 'EOF-JSON'],
+    ['<<123', '123'],
+    ['<<\\EOF', 'EOF'],
+    ['<<E"O"F', 'EOF'],
+    ["<<a'b c'd", 'ab cd'],
+    ["<< 'A B'", 'A B'],
+    ['<<\t EOF', 'EOF'],
+    ['<<-EOF', 'EOF'],
+    ['<<- EOF', 'EOF'],
+    ["<<-'A-B'", 'A-B'],
+  ]
+  for (const [open, word] of spellings) {
+    expect(commandsIn(shell(`cat ${open}`, 'npm test', word, 'make lint'))).toEqual(['make lint'])
+  }
+})
+
+test('an unquoted heredoc delimiter stops at whitespace or a shell metacharacter', () => {
+  for (const stop of [' ', ';', '&', '|', '<', '>', '(', ')']) {
+    expect(commandsIn(shell(`cat <<EOF${stop}x`, 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  }
+})
+
+test("a quoted delimiter's quotes don't change how the rest of its line reads", () => {
+  expect(commandsIn(shell("cat <<'a;b' && npm run build", 'npm test', 'a;b', 'go vet'))).toEqual(['npm run build', 'go vet'])
+})
+
+test('a part of a longer delimiter does not end its heredoc', () => {
+  expect(commandsIn(shell("cat <<'EOF-JSON'", 'EOF', 'npm test', 'EOF-JSON', 'make lint'))).toEqual(['make lint'])
+})
+
+test('a terminator must match the whole line, and only <<- allows leading tabs', () => {
+  for (const line of ['  EOF', '\tEOF', 'EOF ', 'EOFX', 'xEOF']) {
+    expect(commandsIn(shell('cat <<EOF', line, 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  }
+  expect(commandsIn(shell('cat <<-EOF', 'npm test', '\t\tEOF', 'make lint'))).toEqual(['make lint'])
+  for (const line of ['  EOF', '\t EOF', 'EOF ']) {
+    expect(commandsIn(shell('cat <<-EOF', line, 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  }
+})
+
+test('each heredoc on a line keeps its own terminator rule', () => {
+  expect(commandsIn(shell('cat <<-A <<B', '\tA', 'npm test', '\tB', 'make lint', 'B', 'go vet'))).toEqual(['go vet'])
+})
+
+test("a terminator is matched after the code block's own indent comes off, and no more than that", () => {
+  const block = (...lines: string[]): string => `1. Write it.\n\n   \`\`\`bash\n${lines.join('\n')}\n   \`\`\`\n`
+  expect(commandsIn(block('   cat <<-EOF', '   npm test', '   \tEOF', '   make lint'))).toEqual(['make lint'])
+  expect(commandsIn(block('   cat <<EOF', '     EOF', '   npm test', '   EOF', '   make lint'))).toEqual(['make lint'])
+  expect(commandsIn(block('   cat <<EOF', '   npm test', 'EOF', '   make lint'))).toEqual(['make lint'])
+  expect(commandsIn(block('   cat <<EOF', '   npm test', '  EOF', '   make lint'))).toEqual(['make lint'])
+})
+
+test('with nothing to read as a delimiter, or an unclosed quote, no heredoc opens', () => {
+  for (const line of ['cat <<(x', "cat <<''", "cat <<'EOF", 'cat <<"EOF', 'cat <<EOF"']) {
+    expect(commandsIn(shell(line, 'x', 'npm test'))).toEqual(['npm test'])
+  }
+})
+
+test('<< inside arithmetic opens no heredoc, with or without the $', () => {
+  for (const line of ['((x = 1 << 2))', 'echo $(( (1+2) << 3 ))', 'echo $(( (1)+(2) << 3 ))', 'echo $((a<<b))', 'grep x <<<EOF']) {
+    expect(commandsIn(shell(line, 'npm test'))).toEqual(['npm test'])
+  }
+})
+
+test('arithmetic ends where its parentheses do, so the rest of the line reads as usual', () => {
+  expect(commandsIn(shell('x=$((1<<2)); npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('((a || b)) && npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('echo $((1<<2)) <<EOF', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+})
+
+test('a single parenthesis is not arithmetic, so a heredoc inside one still opens', () => {
+  expect(commandsIn(shell('x=$(cat <<EOF', 'npm test', 'EOF', ')', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('(cat <<EOF', 'npm test', 'EOF', ')', 'make lint'))).toEqual(['make lint'])
+})
+
+test('only an odd number of trailing backslashes continues a line', () => {
+  expect(commandsIn(shell("printf '%s\\n' foo\\\\", 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('cargo test \\', '--all'))).toEqual(['cargo test --all'])
+  expect(commandsIn(shell('cargo test \\\\\\', '--all'))).toEqual(['cargo test \\\\ --all'])
+})
+
+const rulesIn = (body: string): string[] => parseSkill(skill(body), {}).rules.map(rule => rule.kind)
+
+test("a paragraph after a blank line, at or left of a list's own indent, ends the list", () => {
+  expect(titles('  - Overview\n\n  A paragraph outside the list.\n\n  1. Setup\n  2. Verify')).toEqual(['Setup', 'Verify'])
+  expect(titles('  - Overview\n\nA paragraph outside the list.\n\n  1. Setup\n')).toEqual(['Setup'])
+  expect(rulesIn('  - Overview\n\n  A paragraph.\n\n    You MUST x\n')).toEqual([])
+  expect(titles('1. a\n\n   para\n\nnot lazy\n2. b\n')).toEqual(['a'])
+})
+
+test('a paragraph deeper than its list stays in it', () => {
+  expect(titles('  - Overview\n\n    more of it\n\n  1. nested under it\n')).toEqual([])
+  expect(rulesIn('- a\n\n  more of it\n\n    You MUST x\n')).toEqual(['MUST'])
+})
+
+test('an outdented item moves the list to its indent', () => {
+  expect(rulesIn('  - a\n- b\n\n  deeper than b\n\n    You MUST x\n')).toEqual(['MUST'])
+})
+
+test('a line straight after an item is a lazy continuation, and belongs to the item', () => {
+  expect(rulesIn('- a\nlazy\n\n    You MUST x\n')).toEqual(['MUST'])
+  expect(titles('1. a\nlazy\n2. b\n')).toEqual(['a', 'b'])
+  expect(titles('  1. a\n  lazy\n  2. b\n')).toEqual(['a', 'b'])
+  expect(titles('- [ ] a\nlazy\n- [ ] b\n')).toEqual(['a', 'b'])
+})
+
+test("a line straight after an item's own paragraph is lazy too", () => {
+  expect(titles('1. a\n\n   para\nlazy\n2. b\n')).toEqual(['a', 'b'])
+})
+
+test('a heading or thematic break is never lazy, while a deeper one stays in the list', () => {
+  expect(rulesIn('- a\n## Next\n\n    You MUST x\n')).toEqual([])
+  expect(titles('1. a\n## Next\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n---\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n___\n2. b\n')).toEqual(['a'])
+  expect(rulesIn('- a\n  ## Sub\n\n    You MUST x\n')).toEqual(['MUST'])
+})
+
+test('a line straight after a code block is not lazy', () => {
+  expect(titles('1. Run:\n```bash\npytest\n```\nThen this.\n2. b\n')).toEqual(['Run:'])
+  expect(rulesIn('- a\n```\nx\n```\nThen this.\n\n    You MUST x\n')).toEqual([])
+})
+
+test('code spans stay literal in a title, while emphasis around them goes', () => {
+  const body = `1. Edit \`__init__.py\`
+2. Run \`__tests__\`
+3. Use \`*a*\` here
+4. **Run \`npm test\`**
+5. \`\`a\`b\`\` and \`_c_\`
+6. a \` stray *b*
+`
+  expect(titles(body)).toEqual(['Edit __init__.py', 'Run __tests__', 'Use *a* here', 'Run npm test', 'a`b and _c_', 'a ` stray b'])
+})
+
+test('a code span closes only on a run of its own length, whole', () => {
+  expect(titles('1. ```a`` x\n')).toEqual(['```a`` x'])
+  expect(titles('1. `a``b`\n')).toEqual(['a``b'])
+})
+
+test('the title cap counts the code span, not what stood in for it', () => {
+  expect(titles(`1. ${'a'.repeat(115)} \`${'b'.repeat(20)}\`\n`)).toEqual([`${'a'.repeat(115)} bbbb`])
+})
+
+test("text that looks like what stands in for a code span is left alone", () => {
+  expect(titles('1. \u00009\u0000 x\n')).toEqual(['\u00009\u0000 x'])
+})
+
+// ------------------------------------------------------------ PR #16's review
+
+test('arithmetic stays open across lines, so a shift on a later line opens no heredoc', () => {
+  expect(commandsIn(shell('echo $((', '  1 << 2', '))', 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('((', '  1 << 2', '))', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('echo $((', '  1 << 2', ')) && npm test'))).toEqual(['npm test'])
+})
+
+test("a code block's end closes arithmetic left open in it", () => {
+  expect(commandsIn(`${shell('((')}${shell('cat <<EOF', 'npm test', 'EOF', 'make lint')}`)).toEqual(['make lint'])
+})
+
+test('closed arithmetic leaves a heredoc on a later line to open as usual', () => {
+  expect(commandsIn(shell('x=$((1<<2))', 'cat <<EOF', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+})
+
+test('a line that starts inside arithmetic is still read for commands', () => {
+  const [command] = commandsIn(shell('((cd a);', 'npm test)'))
+  expect(command?.startsWith('npm test')).toBe(true)
+})
+
+test('a spaced thematic break opens no list', () => {
+  expect(titles('* * *\nIntro text.\n\n  1. Setup\n  2. Verify\n')).toEqual(['Setup', 'Verify'])
+  expect(titles('- - -\nIntro text.\n\n  1. Setup\n  2. Verify\n')).toEqual(['Setup', 'Verify'])
+  expect(rulesIn('* * *\nIntro text.\n\n    MUST four\n')).toEqual([])
+})
+
+test('a spaced thematic break ends a list at its indent, and a deeper one stays in it', () => {
+  expect(titles('1. a\n- - -\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n* * *\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n   - - -\n2. b\n')).toEqual(['a', 'b'])
+})
+
+test('a blockquote is never lazy', () => {
+  expect(titles('1. First\n> Separate quote\n2. Different list\n')).toEqual(['First'])
+  expect(rulesIn('- a\n> quote\n\n    You MUST not see code.\n')).toEqual([])
+})
+
+test('an HTML block start of each kind that can interrupt a paragraph is never lazy', () => {
+  for (const start of ['<pre>', '<PRE>', '<script>', '<style x>', '<textarea\tx>', '<pre', '<!-- c -->', '<?x?>', '<!DOCTYPE x>', '<![CDATA[x]]>', '<div>', '</div>', '<div/>', '<DIV class="x">', '<div\tx>', '<details']) {
+    expect(rulesIn(`- a\n${start}\n\n    You MUST not see code.\n`)).toEqual([])
+  }
+})
+
+test('any other tag stays lazy, as does text that only looks like a block tag', () => {
+  for (const line of ['<kbd>x</kbd> lazy', '<divx>', '<div.x>', '<prefix>', '<pre.x>', '</pre>', '<1>', '<', '<!1']) {
+    expect(titles(`1. a\n${line}\n2. b\n`)).toEqual(['a', 'b'])
+  }
+})
+
+test('a blockquote deeper than its list stays in the list', () => {
+  expect(rulesIn('- a\n  > deeper\n\n    You MUST x\n')).toEqual(['MUST'])
+})
+
+test('a long run of backslashes inside a shell line takes linear time', () => {
+  const started = Date.now()
+  expect(commandsIn(shell(`echo ${'\\'.repeat(200000)}x`, 'npm test'))).toEqual(['npm test'])
+  expect(Date.now() - started).toBeLessThan(1000)
+})
+
+test('a long trailing run of backslashes still continues the line only when odd', () => {
+  expect(commandsIn(shell(`echo ${'\\'.repeat(200000)}`, 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell(`echo ${'\\'.repeat(200001)}`, 'npm test'))).toEqual([])
+})
+
+test('a literal NUL in a title cannot be mistaken for what stands in for a code span', () => {
+  expect(titles('1. \u00000\u0000 and `x`\n')).toEqual(['\u00000\u0000 and x'])
+  expect(titles('1. `a\u0000b` c\n')).toEqual(['a\u0000b c'])
+})
+
+test("a line four past an item's content, after a blank line, is an indented code block", () => {
+  expect(rulesIn('- a\nlazy\n\n      MUST six\n')).toEqual([])
+  expect(rulesIn('- a\n\n      MUST six\n')).toEqual([])
+  expect(rulesIn('1. a\n\n       MUST seven\n')).toEqual([])
+})
+
+test("a line short of that is the item's own paragraph", () => {
+  expect(rulesIn('- a\n\n     MUST five\n')).toEqual(['MUST'])
+  expect(rulesIn('1. a\n\n      MUST six\n')).toEqual(['MUST'])
+})
+
+test("an item's content starts after up to four spaces, or one space past the marker when there are more", () => {
+  expect(rulesIn('-    a\n\n        MUST eight\n')).toEqual(['MUST'])
+  expect(rulesIn('-     a\n\n      MUST six\n')).toEqual([])
+})
+
+test('a spaced thematic break inside a list does not move what counts as content', () => {
+  expect(rulesIn('- a\n  - - -\n\n      MUST six\n')).toEqual([])
+})
+
+test("a nested item's own paragraph keeps its rule, at any depth", () => {
+  expect(rulesIn('- a\n  - b\n\n    MUST four\n')).toEqual(['MUST'])
+  expect(rulesIn('- a\n\n    - b\n\n      MUST six\n')).toEqual(['MUST'])
+})
+
+test('an item too deep to open a list opens none', () => {
+  expect(rulesIn('text\n    - not an item\n\n    You MUST not see code.\n')).toEqual([])
+})
+
+test('a list indented under a bullet stays nested, not a list of its own', () => {
+  expect(titles('- a\n\n    1. nested\n')).toEqual([])
+})
+
+test('an item inside an HTML block is not an item, and the block runs to its blank line', () => {
+  expect(titles('<div>\n1. a\n2. b\n')).toEqual([])
+  expect(titles('<div>\n- [ ] a\n')).toEqual([])
+  expect(rulesIn('<div>\n1. a\nnpm test\n\n      MUST six\n')).toEqual([])
+})
+
+test('each other kind of HTML block runs to its own closer', () => {
+  for (const [open, close] of [['<!-- c', '-->'], ['<?x', '?>'], ['<!X y', '>'], ['<![CDATA[', ']]>'], ['<pre>', '</pre>']]) {
+    expect(titles(`${open}\n1. a\n${close}\n1. b\n`)).toEqual(['b'])
+  }
+})
+
+test('an HTML block closed on its own line leaves the next line alone', () => {
+  for (const line of ['<!-- c -->', '<?x?>', '<!X y>', '<![CDATA[x]]>', '<pre>x</pre>']) {
+    expect(titles(`${line}\n1. a\n`)).toEqual(['a'])
+  }
+})
+
+test('a blank line ends any HTML block, so a list after one is read', () => {
+  expect(titles('<div>\n\n1. a\n')).toEqual(['a'])
+  expect(titles('<!-- c\n\n1. a\n')).toEqual(['a'])
+})
+
+test('a tag that cannot start a block opens no HTML block', () => {
+  expect(titles('<span>\n1. a\n')).toEqual(['a'])
+})
+
+test('a rule inside an HTML block still counts', () => {
+  expect(rulesIn('<details>\nYou MUST x\n</details>\n')).toEqual(['MUST'])
+})
+
+test('a block tag deeper than an open list stays in the list', () => {
+  expect(titles('1. a\n   <div>\n2. b\n')).toEqual(['a', 'b'])
+})
+
+test("tabs count to the next multiple of four, in an item's content and in the lines under it", () => {
+  expect(rulesIn('-\tWork\n\n      You MUST add tests.\n')).toEqual(['MUST'])
+  expect(rulesIn('  -\tWork\n\n      You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('1.\tWork\n\n       You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('- Work\n\n  \tYou MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('-\tWork\n\n        You MUST x\n')).toEqual([])
+  expect(rulesIn('  -\tWork\n\n        You MUST x\n')).toEqual([])
+  expect(rulesIn('1.\tWork\n\n        You MUST x\n')).toEqual([])
+  expect(rulesIn('- Work\n\n\t\tYou MUST x\n')).toEqual([])
+  expect(rulesIn('-\t\tWork\n\n      You MUST x\n')).toEqual([])
+})
+
+test('a tab before a nested marker counts to the next multiple of four', () => {
+  expect(rulesIn('- a\n\t- b\n\n         You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('- a\n\t- b\n\n          You MUST x\n')).toEqual([])
+  expect(rulesIn('- a\n\t-  b\n\n          You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('- a\n\t-  b\n\n           You MUST x\n')).toEqual([])
+})
+
+test('a heredoc delimiter keeps a substitution whole, as bash reads it literally', () => {
+  expect(commandsIn(shell('cat <<$(echo EOF)', 'npm test', '$(echo EOF)', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$(x)y', 'npm test', '$(x)y', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<`echo E`', 'npm test', '`echo E`', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$(a (b) c)', 'npm test', '$(a (b) c)', 'make lint'))).toEqual(['make lint'])
+})
+
+test('a substitution left unclosed in a delimiter opens no heredoc', () => {
+  expect(commandsIn(shell('cat <<$(echo', 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('cat <<`echo', 'npm test'))).toEqual(['npm test'])
+})
+
+test('a parenthesis that is not a substitution still ends the delimiter', () => {
+  expect(commandsIn(shell('x=$(cat <<EOF)', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$X)', 'npm test', '$X', 'make lint'))).toEqual(['make lint'])
+})
+
+test('a line of many unclosed substitutions after << takes linear time', () => {
+  const started = Date.now()
+  for (const opening of ['$(', '${']) {
+    expect(commandsIn(shell(`cat <<${opening} `.repeat(20000), 'npm test'))).toEqual(['npm test'])
+  }
+  expect(Date.now() - started).toBeLessThan(1000)
+})
+
+test('a quote in a delimiter closes at the next one of its kind, and brackets at their match', () => {
+  expect(commandsIn(shell("cat <<'a\"b'", 'npm test', 'a"b', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<${a{b}c}', 'npm test', '${a{b}c}', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$(a}b)', 'npm test', '$(a}b)', 'make lint'))).toEqual(['make lint'])
+})
