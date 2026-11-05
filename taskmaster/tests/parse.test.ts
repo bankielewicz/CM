@@ -1020,3 +1020,11 @@ test('a backslash ending a comment continues nothing, because the comment ends a
   expect(commandsIn(shell('make lint \\', '# comment', 'npm test'))).toEqual(['make lint', 'npm test'])
   expect(commandsIn(shell('cat <<EOF \\', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
 })
+
+test('<< inside $[…] is a shift, as in $((…)), while a bare [ is the test command', () => {
+  expect(commandsIn(shell('echo $[1<<2]', 'npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('x=$[1<<2]; npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('echo $[ (1<<2) ] && npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('[ -f x ] && npm test'))).toEqual(['npm test'])
+  expect(commandsIn(shell('echo ${a[1]} <<EOF', 'npm test', 'EOF', 'make lint'))).toEqual(['make lint'])
+})

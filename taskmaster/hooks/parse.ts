@@ -404,6 +404,7 @@ function readShell(text: string, arithmetic: number): { segments: string[]; here
   const segments: string[] = []
   const heredocs: Heredoc[] = []
   let quote = ''
+  let brackets = 0
   let start = 0
   let end = text.length
   let found: ReadonlyMap<number, number> | undefined
@@ -430,9 +431,14 @@ function readShell(text: string, arithmetic: number): { segments: string[]; here
     else if (quote) quote = char === quote ? '' : quote
     else if (char === '"' || char === "'") quote = char
     else if (arithmetic > 0) arithmetic += char === '(' ? 1 : char === ')' ? -1 : 0
+    else if (brackets > 0) brackets += char === '[' ? 1 : char === ']' ? -1 : 0
     else if (text.startsWith('((', at) && isArithmetic(at)) {
       // Inside $((…)) or ((…)), << is a shift, so nothing there can open a heredoc.
       arithmetic = 2
+      at += 1
+    } else if (text.startsWith('$[', at)) {
+      // `$[…]` is bash's older arithmetic, so << there is a shift too. A bare `[` is the test command, and `${a[1]}` an index.
+      brackets = 1
       at += 1
     } else if (char === '(') {
       // `$(`, `<(` and `>(` substitute into the command around them. A `(` where a command may start opens a subshell, and
