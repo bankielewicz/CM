@@ -954,3 +954,19 @@ test('a parenthesis where no command may start is a character like any other, as
   expect(commandsIn(shell('true && (go vet)'))).toEqual(['go vet'])
 })
 
+
+test('a line is lazy only after paragraph text, not after a heading, thematic break, HTML line, setext underline or empty quote in an item', () => {
+  for (const block of ['  ### Header', '  ---', '  <!-- c -->', '  <div>\n  </div>', '  Head\n  ===', '  > # q', '  >']) {
+    expect(rulesIn(`- a\n\n${block}\nnot lazy\n\n    You MUST not see code.\n`)).toEqual([])
+  }
+  expect(titles('1. a\n\n   ### Header\ntext\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n\n   ---\ntext\n2. b\n')).toEqual(['a'])
+  expect(titles('1. a\n\n   Head\n   ===\ntext\n2. b\n')).toEqual(['a'])
+})
+
+
+test("a line after a blockquote's paragraph, or after a tag that is not a block, is lazy, as that paragraph is still open", () => {
+  expect(rulesIn('- a\n\n  > q\nlazy\n\n    You MUST x\n')).toEqual(['MUST'])
+  expect(titles('1. a\n\n   > q\nlazy\n2. b\n')).toEqual(['a', 'b'])
+  expect(rulesIn('- a\n\n  <span>x</span>\nlazy\n\n    You MUST x\n')).toEqual(['MUST'])
+})

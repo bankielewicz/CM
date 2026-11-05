@@ -43,8 +43,8 @@ function columns(text: string): number {
 /**
  * `fence`: the line is a code fence itself. `indent`: the fence's, on the lines
  * inside it. `inList`: a list was open when this line began. `afterText`: the line
- * before it was text, not blank or code. `inHtml`: an HTML block was open when
- * this line began, so a list marker on it isn't an item.
+ * before it was paragraph text, which this line may lazily continue. `inHtml`: an
+ * HTML block was open when this line began, so a list marker on it isn't an item.
  */
 type Line = { text: string; number: number; code?: { lang: string; fence?: true; indent?: number }; inList?: boolean; afterText?: boolean; inHtml?: boolean }
 
@@ -111,7 +111,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       // A blank line ends any of them. CommonMark lets a comment run on past one, and reading on from there is what `main` did.
       if (htmlCloser !== undefined && (blank || (htmlCloser !== '' && line.text.includes(htmlCloser)))) htmlCloser = undefined
       const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}), ...(inHtml ? { inHtml } : {}) }
-      afterText = !blank
+      afterText = !inHtml && isParagraph(line.text, afterText)
       // `* * *` and `- - -` have a list marker's shape, and are thematic breaks.
       const item = THEMATIC_BREAK.test(line.text) ? null : ANY_ITEM.exec(line.text)
       if (item) {
@@ -140,6 +140,8 @@ const ORDERED = /^(\s*)\d+[.)]\s+(.*)$/
 const CHECKLIST = /^(\s*)[-*+]\s+\[[ xX]\]\s+(.*)$/
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/
 const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
+/** A setext underline for a level-1 heading. The level-2 form has a thematic break's shape and is read as one. */
+const SETEXT = /^ {0,3}=+[ \t]*$/
 
 /** CommonMark's HTML blocks of types 1 to 5, and what ends each. Type 1 has no closing form here: `</pre>` starts nothing. */
 const HTML_BLOCKS: readonly (readonly [RegExp, string])[] = [
@@ -173,6 +175,17 @@ function opensHtml(text: string): string | undefined {
 /** Whether a line can interrupt a paragraph by starting a block of its own. Fences and list items are read before this. */
 function startsBlock(text: string): boolean {
   return HEADING.test(text) || THEMATIC_BREAK.test(text) || /^ {0,3}>/.test(text) || htmlEnd(text) !== undefined
+}
+
+/**
+ * Whether a line is paragraph text, which the line after it may lazily continue.
+ * A blockquote's line is as its content is, read afresh. `afterText`: the line
+ * before was paragraph text, so `===` under it is a setext underline instead.
+ */
+function isParagraph(text: string, afterText: boolean): boolean {
+  const quotes = /^(?: {0,3}> ?)+/.exec(text)?.[0].length ?? 0
+  const inner = text.slice(quotes)
+  return inner.trim() !== '' && !startsBlock(inner) && !(afterText && quotes === 0 && SETEXT.test(inner))
 }
 
 /**
