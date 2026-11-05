@@ -999,3 +999,14 @@ test("a line without the quote's markers ends the quote, and the fence inside it
   expect(rulesIn('> ```\n> code\nYou MUST see this.\n')).toEqual(['MUST'])
   expect(commandsIn('> ```bash\n> npm test\n\n```bash\nmake lint\n```\n')).toEqual(['npm test', 'make lint'])
 })
+
+test('a setext underline closes only a paragraph at its own level; under an item or quote line at another level, === is lazy text', () => {
+  expect(rulesIn('- a\n===\n      MUST six\n')).toEqual(['MUST'])
+  expect(rulesIn('> q\n===\n\tMUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('  > q\n  ===\n      MUST six\n')).toEqual(['MUST'])
+  expect(titles('  1. n\n===\nlazy\n  1. n\n')).toEqual(['n', 'n'])
+  expect(titles('1. a\n===\nlazy\n2. b\n')).toEqual(['a', 'b'])
+  expect(rulesIn('- a\n  ===\n      MUST six\n')).toEqual([])
+  expect(titles('1. a\n   ===\ntext\n2. b\n')).toEqual(['a'])
+  expect(rulesIn('Head\n===\n    MUST x\n')).toEqual([])
+})

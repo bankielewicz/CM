@@ -112,6 +112,7 @@ function classify(lines: { text: string; number: number }[]): Line[] {
   let htmlCloser: string | undefined
   let codeMayStart = true
   let afterText = false
+  let paragraphDepth = 0
   return lines.map(line => {
     // A fence inside a blockquote runs while its lines keep the quote's markers. A line without them ends the quote, and the fence with it.
     const quoted = fence && fence.quotes > 0 ? unquote(line.text, fence.quotes) : undefined
@@ -132,7 +133,10 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       // A blank line ends any of them. CommonMark lets a comment run on past one, and reading on from there is what `main` did.
       if (htmlCloser !== undefined && (blank || (htmlCloser !== '' && line.text.includes(htmlCloser)))) htmlCloser = undefined
       const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}), ...(inHtml ? { inHtml } : {}) }
-      afterText = !inHtml && isParagraph(line.text, afterText)
+      // A setext underline closes the paragraph above it only at that paragraph's own level, a quote's or an item's content. Anywhere else `===` is lazy text.
+      const underline = afterText && SETEXT.test(opening.text) && opening.depth === paragraphDepth && (listIndent === undefined || columns(/^\s*/.exec(line.text)?.[0] ?? '') >= contentIndent)
+      afterText = !inHtml && !underline && isParagraph(opening.text)
+      if (afterText) paragraphDepth = opening.depth
       // Indented code can start anywhere but in a paragraph. A fence's close leaves it off: a line straight after one is read as text.
       codeMayStart = !afterText
       // `* * *` and `- - -` have a list marker's shape, and are thematic breaks.
@@ -201,15 +205,9 @@ function startsBlock(text: string): boolean {
   return HEADING.test(text) || THEMATIC_BREAK.test(text) || /^ {0,3}>/.test(text) || htmlEnd(text) !== undefined
 }
 
-/**
- * Whether a line is paragraph text, which the line after it may lazily continue.
- * A blockquote's line is as its content is, read afresh. `afterText`: the line
- * before was paragraph text, so `===` under it is a setext underline instead.
- */
-function isParagraph(text: string, afterText: boolean): boolean {
-  const quotes = /^(?: {0,3}> ?)+/.exec(text)?.[0].length ?? 0
-  const inner = text.slice(quotes)
-  return inner.trim() !== '' && !startsBlock(inner) && !(afterText && quotes === 0 && SETEXT.test(inner))
+/** Whether a line, its blockquote markers off, is paragraph text, which the line after it may lazily continue. */
+function isParagraph(text: string): boolean {
+  return text.trim() !== '' && !startsBlock(text)
 }
 
 /**
