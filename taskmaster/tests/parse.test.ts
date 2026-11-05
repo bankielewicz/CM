@@ -898,3 +898,9 @@ test('a quote in a delimiter closes at the next one of its kind, and brackets at
   expect(commandsIn(shell('cat <<${a{b}c}', 'npm test', '${a{b}c}', 'make lint'))).toEqual(['make lint'])
   expect(commandsIn(shell('cat <<$(a}b)', 'npm test', '$(a}b)', 'make lint'))).toEqual(['make lint'])
 })
+
+test("a heredoc delimiter's own metacharacters are not read as shell syntax, while what follows it still is", () => {
+  expect(commandsIn(shell('cat <<$(x; npm test)', 'body', '$(x; npm test)', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$(x && npm test)', 'body', '$(x && npm test)', 'make lint'))).toEqual(['make lint'])
+  expect(commandsIn(shell('cat <<$(x) && npm test', 'body', '$(x)', 'make lint'))).toEqual(['npm test', 'make lint'])
+})

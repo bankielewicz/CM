@@ -280,8 +280,8 @@ function rules(lines: Line[]): ParsedRule[] {
   return found
 }
 
-/** A heredoc's terminator. `stripTabs`: opened with `<<-`, so leading tabs don't count. */
-type Heredoc = { word: string; stripTabs: boolean }
+/** A heredoc's terminator. `stripTabs`: opened with `<<-`, so leading tabs don't count. `end`: where its word ends on its line. */
+type Heredoc = { word: string; stripTabs: boolean; end: number }
 
 /**
  * Reads the heredoc opened by the `<<` at `at`: the whole delimiter word, with its
@@ -314,7 +314,7 @@ function readHeredoc(text: string, at: number, closes: () => ReadonlyMap<number,
       cursor = close
     } else word += char
   }
-  return word ? { word, stripTabs } : undefined
+  return word ? { word, stripTabs, end: cursor } : undefined
 }
 
 /**
@@ -378,7 +378,8 @@ function readShell(text: string, arithmetic: number): { segments: string[]; here
     } else if (text.startsWith('<<', at)) {
       const heredoc = readHeredoc(text, at, closes)
       if (heredoc) heredocs.push(heredoc)
-      at += 1
+      // The word is bash's to take literally, so none of its `;`, `&&` or `((` is read as syntax.
+      at = heredoc ? heredoc.end - 1 : at + 1
     }
   }
   segments.push(text.slice(start, end))
