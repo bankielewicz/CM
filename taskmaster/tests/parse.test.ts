@@ -970,3 +970,18 @@ test("a line after a blockquote's paragraph, or after a tag that is not a block,
   expect(titles('1. a\n\n   > q\nlazy\n2. b\n')).toEqual(['a', 'b'])
   expect(rulesIn('- a\n\n  <span>x</span>\nlazy\n\n    You MUST x\n')).toEqual(['MUST'])
 })
+
+test('an indented line straight after a heading, thematic break, setext underline, closed HTML block or empty quote is code, as no paragraph is open', () => {
+  expect(rulesIn('# H\n    You MUST not see code.\n')).toEqual([])
+  expect(rulesIn('---\n    You MUST not see code.\n')).toEqual([])
+  expect(rulesIn('Head\n===\n    You MUST not see code.\n')).toEqual([])
+  expect(rulesIn('<!-- c -->\n    You MUST not see code.\n')).toEqual([])
+  expect(rulesIn('>\n    You MUST not see code.\n')).toEqual([])
+  expect(titles('# H\n    1. not a step\n')).toEqual([])
+})
+
+test("an indented line straight after a blockquote's paragraph, a list item or an open HTML block continues it, so its rule counts", () => {
+  expect(rulesIn('> q\n    You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('- a\n    You MUST x\n')).toEqual(['MUST'])
+  expect(rulesIn('<div>\n    You MUST x\n')).toEqual(['MUST'])
+})

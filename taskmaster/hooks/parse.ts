@@ -81,9 +81,9 @@ function body(text: string): { text: string; number: number }[] {
 
 /**
  * Marks each line inside a code block: fenced, whatever the fence's indent, with
- * the block's language, or indented four spaces after a blank line. Inside a list
- * that's four past the latest item's content, and anything shallower is the item's
- * own paragraph, so it stays text and its rules count. A nested item moves that
+ * the block's language, or indented four spaces where no paragraph is open. Inside
+ * a list that's four past the latest item's content, and anything shallower is the
+ * item's own paragraph, so it stays text and its rules count. A nested item moves that
  * point, and one left behind errs towards keeping a rule. A list keeps its own
  * indent, and ends as `endsList` says.
  */
@@ -105,13 +105,14 @@ function classify(lines: { text: string; number: number }[]): Line[] {
         return { ...line, code: { lang: '', fence: true } }
       }
       const blank = line.text.trim() === ''
-      if (!blank && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : columns(/^\s*/.exec(line.text)?.[0] ?? '') >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
-      codeMayStart = blank
       const inHtml = htmlCloser !== undefined
+      if (!blank && !inHtml && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : columns(/^\s*/.exec(line.text)?.[0] ?? '') >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
       // A blank line ends any of them. CommonMark lets a comment run on past one, and reading on from there is what `main` did.
       if (htmlCloser !== undefined && (blank || (htmlCloser !== '' && line.text.includes(htmlCloser)))) htmlCloser = undefined
       const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}), ...(inHtml ? { inHtml } : {}) }
       afterText = !inHtml && isParagraph(line.text, afterText)
+      // Indented code can start anywhere but in a paragraph. A fence's close leaves it off: a line straight after one is read as text.
+      codeMayStart = !afterText
       // `* * *` and `- - -` have a list marker's shape, and are thematic breaks.
       const item = THEMATIC_BREAK.test(line.text) ? null : ANY_ITEM.exec(line.text)
       if (item) {
