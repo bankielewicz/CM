@@ -68,6 +68,15 @@ test('an exit is any status a process can return, 0 to 255', () => {
   for (const exit of [0, 255]) expect(validateDeclared({ steps: [{ id: 'a', title: 'A', verify: { bash: 'x', exit } }] }).contract?.steps[0]?.verify).toEqual({ bash: 'x', exit })
 })
 
+test('only a higher version number is called newer; a version written as text, or lower, is told to be 1', () => {
+  for (const version of ['1', 0, 1.5, null]) {
+    const { contract, problems } = validateDeclared({ version, steps: [] })
+    expect(contract).toBeUndefined()
+    expect(problems).toEqual(['version must be the number 1'])
+  }
+  expect(validateDeclared({ version: 2, steps: [] }).problems[0]).toMatch(/version 2 is written for a newer taskmaster/)
+})
+
 // Each of these is invalid, and an invalid contract is never half-used.
 const INVALID: [string, unknown, RegExp][] = [
   ['not an object', ['steps'], /object/],

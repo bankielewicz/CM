@@ -31,7 +31,9 @@ export function validateDeclared(value: unknown): { contract?: DeclaredContract;
   for (const key of Object.keys(value)) if (!TOP_KEYS.has(key)) problems.push(`unknown key "${key}"`)
 
   if (value.version !== undefined && value.version !== 1) {
-    problems.push(`version ${String(value.version)} is written for a newer taskmaster; this one reads version 1`)
+    // Only a higher number means a newer taskmaster wrote it. Text such as "1", or a lower number, is a mistake.
+    const newer = typeof value.version === 'number' && Number.isInteger(value.version) && value.version > 1
+    problems.push(newer ? `version ${value.version} is written for a newer taskmaster; this one reads version 1` : 'version must be the number 1')
   }
   // Left out, it's enforce. Blank, as YAML reads `mode:` with nothing after it, it's invalid like any other blank key.
   const mode = value.mode === undefined ? 'enforce' : value.mode
