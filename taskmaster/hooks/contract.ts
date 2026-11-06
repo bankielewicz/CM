@@ -134,7 +134,8 @@ export function fromOverride(fileText: string | undefined, readError?: string): 
   if (fileText === undefined) return { problems: [] }
   let value: unknown
   try {
-    value = JSON.parse(fileText)
+    // A byte-order mark isn't JSON, and editors on Windows often save one.
+    value = JSON.parse(fileText.replace(/^\uFEFF/, ''))
   } catch (error) {
     return { problems: [{ where: 'override', message: `the override file is not JSON: ${(error as Error).message}` }] }
   }

@@ -129,6 +129,10 @@ test('with frontmatterProblem set, the frontmatter tier is not used, even with a
   expect(partial.problems[0]?.message).toMatch(/a key was left out/)
 })
 
+test('an override file saved with a byte-order mark reads the same, as Windows editors often write one', () => {
+  expect(fromOverride(`\uFEFF${JSON.stringify(BLOCK)}`)).toEqual({ contract: CONTRACT, problems: [] })
+})
+
 test('the override tier reads JSON holding the block itself', () => {
   expect(fromOverride(JSON.stringify(BLOCK))).toEqual({ contract: CONTRACT, problems: [] })
   expect(fromOverride(undefined)).toEqual({ problems: [] })
