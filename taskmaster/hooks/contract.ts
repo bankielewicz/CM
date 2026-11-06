@@ -43,8 +43,10 @@ export function validateDeclared(value: unknown): { contract?: DeclaredContract;
   if (value.suggested_by !== undefined && text(value.suggested_by) === undefined) problems.push('suggested_by must be text')
 
   const steps: DeclaredStep[] = []
-  if (!Array.isArray(value.steps)) problems.push('steps must be a list')
-  else value.steps.forEach((raw, index) => {
+  // `mode: off` turns taskmaster off for the skill, so it needs no steps (owner, 2026-11-06). Given, they're still checked.
+  const rawSteps = mode === 'off' && value.steps === undefined ? [] : value.steps
+  if (!Array.isArray(rawSteps)) problems.push('steps must be a list')
+  else rawSteps.forEach((raw, index) => {
     const step = readStep(raw, index + 1, problems)
     if (!step) return
     if (steps.some(other => other.id === step.id)) problems.push(`step id "${step.id}" is repeated`)

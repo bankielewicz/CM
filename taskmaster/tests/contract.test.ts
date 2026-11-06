@@ -87,6 +87,15 @@ test('confirm_before names each step once, and a step set aside for its own prob
   }
 })
 
+test('mode: off needs no steps, while any other mode still needs a list, which may be empty', () => {
+  expect(validateDeclared({ mode: 'off' })).toEqual({ contract: { version: 1, mode: 'off', steps: [], confirmBefore: [] }, problems: [] })
+  expect(validateDeclared({ mode: 'off', steps: [{ id: 'a', title: 'A' }] }).contract?.steps).toEqual([{ id: 'a', title: 'A', mandatory: true }])
+  expect(validateDeclared({ mode: 'off', steps: 'one' }).problems).toEqual(['steps must be a list'])
+  expect(validateDeclared({}).problems).toEqual(['steps must be a list'])
+  expect(validateDeclared({ mode: 'advisory' }).problems).toEqual(['steps must be a list'])
+  expect(validateDeclared({ steps: [] }).contract?.steps).toEqual([])
+})
+
 // Each of these is invalid, and an invalid contract is never half-used.
 const INVALID: [string, unknown, RegExp][] = [
   ['not an object', ['steps'], /object/],
