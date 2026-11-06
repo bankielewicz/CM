@@ -55,7 +55,7 @@ The task list improves (a) and (b) only when four things hold:
 
 ## 3. Design principles
 
-1. **Universal by default, stricter by opt-in.** Any skill or command works with no configuration. Precedence: skill frontmatter, then the user's per-skill override, then LLM extraction, then heuristics.
+1. **Universal by default, stricter by opt-in.** Any skill or command works with no configuration. Precedence: the per-skill override, then skill frontmatter, then LLM extraction, then heuristics. An override beats frontmatter whatever the skill's source, with no setting, except that a `policySettings` skill, which an organisation manages, keeps its valid frontmatter first (owner, 2026-11-06; P1.4 builds it).
 2. **Deterministic gates, soft judgment.** Hard gates check only facts the mod observed. LLM judgment extracts contracts (cached) and gives an advisory audit at Stop; it never blocks on its own except as noted in F7.
 3. **Every block says exactly what to do next, including how to waive.**
 4. **No gate can trap a session.** Every gate has loop limits and overrides, and the user's Esc freezes all gates.
@@ -131,7 +131,8 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
     - **The personal layer** is an entry in `$.store`, keyed by repository and skill: edits you don't want to commit. `$.store` is per user and per machine, and doesn't survive a fresh cloud container. **It wins when both exist.**
     - **The project layer** is the file above: shared, committed and reviewed. The mod reads it each time there's no personal entry, as in a fresh cloud container or on a teammate's machine. It never copies the file into the store, so a change to the file reaches everyone without a personal entry, and the mod needn't know whether it runs on a PC or in the cloud.
     - **The file is opt-in.** A person writes it to share a contract: F16's apply with the project layer, or `/taskmaster contract export <skill>` (Phase 2, with `contract edit`, which starts from the file's contract when there is one).
-    - **Open question for the owner:** whether an override may beat a third-party skill's own frontmatter.
+    - **An override beats the skill's own frontmatter, whatever its source** (owner, 2026-11-06), with no setting: the person who wrote the override chose it. An invalid or flagged block was already set aside for the override.
+    - **The one exception: `policySettings`** (owner, 2026-11-06). A skill an organisation manages keeps its valid frontmatter first, so a user's or a repository's override can't loosen a mandated workflow. Its override applies only where that block is missing or invalid. P1.4 builds both.
     - Both layers are protected as F17 says. A project file that loosens what it replaces needs the person's yes, once per file version and store, unless `overrideTrust: default-branch` trusts it (F17.1).
   - **The file is named after the skill as `skill.prompt` names it, with a plugin's name as its folder** (owner, 2026-11-06): `notes` reads `notes.json`, and a plugin's `acme:notes` reads `acme/notes.json`, so a hand-made `notes.json` won't match it. Each part of the name must be letters, digits, `.`, `-` or `_`, starting with a letter or digit, so no two skills share a file and none leaves the folder. A skill with any other name reads no override file, and the debug log says why. On a case-insensitive disk, `Notes` and `notes` still share one.
   - **Unchecked live:** whether one skill can load as `notes` one time and `acme:notes` another, say typed or through the Skill tool. If it can, it reads a different file each way. A probe should settle it before F16 writes these files.
@@ -454,6 +455,8 @@ A user asks Claude to read a skill and recommend Taskmaster frontmatter for it. 
 | A plugin you're developing (`--plugin-dir`, a folder marketplace) | its source file | It's yours |
 | An installed plugin (a git or npm copy) | override | Edits are overwritten on update, and it's not yours. Also offer a ready-to-paste **upstream suggestion** (the snippet and issue text) for its author |
 | `policySettings` (managed), `mcp`, `syncedSkills`, `built-in` (no file) | override only | It can't or shouldn't be edited |
+
+- **With overrides first (owner, 2026-11-06), these targets stay.** Two consequences for apply: a frontmatter edit is shadowed for anyone with an override for that skill, so apply says so and offers to remove the override. And since a `policySettings` skill keeps its valid frontmatter first, an override for one with a valid block applies only once that block is gone, so apply says that too.
 
 - **Post-check after the `Edit`:**
   - the mod hashes the skill body and every other frontmatter key before and after. **Only the `taskmaster:` key may change.** Anything else triggers a hidden note asking Claude to revert it, and an incident is logged,
