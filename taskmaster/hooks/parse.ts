@@ -41,12 +41,40 @@ function columns(text: string): number {
 }
 
 /**
- * `fence`: the line is a code fence itself. `indent`: the fence's, on the lines
- * inside it. `inList`: a list was open when this line began. `afterText`: the line
- * before it was text, not blank or code. `inHtml`: an HTML block was open when
- * this line began, so a list marker on it isn't an item.
+ * `text`: the line's own, except inside a fence in a blockquote, where the quote's
+ * markers are off. `fence`: the line is a code fence itself. `indent`: the fence's,
+ * on the lines inside it. `inList`: a list was open when this line began.
+ * `afterText`: the line before it was paragraph text, which this line may lazily
+ * continue. `inHtml`: an HTML block was open when this line began, so a list
+ * marker on it isn't an item.
  */
 type Line = { text: string; number: number; code?: { lang: string; fence?: true; indent?: number }; inList?: boolean; afterText?: boolean; inHtml?: boolean }
+
+/**
+ * An open code fence. `quotes`: the blockquote markers before it, which its lines keep. `item`: for a quote inside a list
+ * item, the item's content column, left of which a quote marker belongs to a quote of its own.
+ */
+type Fence = { marker: string; lang: string; indent: number; quotes: number; item?: number }
+
+/** The text after up to `depth` blockquote markers, and how many came off. */
+function unquote(text: string, depth: number): { text: string; depth: number } {
+  const prefix = /^(?: {0,3}> ?)+/.exec(text)?.[0] ?? ''
+  let at = 0
+  let found = 0
+  while (found < depth && at < prefix.length) {
+    at = prefix.indexOf('>', at) + 1
+    if (prefix[at] === ' ') at += 1
+    found += 1
+  }
+  return { text: text.slice(at), depth: found }
+}
+
+/** How far a quoted line's content is indented, in columns past its last marker and the one column that marker may take. */
+function quotedIndent(text: string): number {
+  const markers = (/^(?: {0,3}> ?)+/.exec(text)?.[0] ?? '').replace(/ $/, '')
+  const lead = /^[ \t]*/.exec(text.slice(markers.length))?.[0] ?? ''
+  return Math.max(0, columns(markers + lead) - columns(markers) - 1)
+}
 
 /** A step and the lines that belong to it, for placing commands under steps. */
 type Span = { step: ParsedStep; end: number }
@@ -81,39 +109,70 @@ function body(text: string): { text: string; number: number }[] {
 
 /**
  * Marks each line inside a code block: fenced, whatever the fence's indent, with
- * the block's language, or indented four spaces after a blank line. Inside a list
- * that's four past the latest item's content, and anything shallower is the item's
- * own paragraph, so it stays text and its rules count. A nested item moves that
+ * the block's language, or indented four spaces where no paragraph is open. Inside
+ * a list that's four past the latest item's content, and anything shallower is the
+ * item's own paragraph, so it stays text and its rules count. A nested item moves that
  * point, and one left behind errs towards keeping a rule. A list keeps its own
  * indent, and ends as `endsList` says.
  */
 function classify(lines: { text: string; number: number }[]): Line[] {
-  let fence: { marker: string; lang: string; indent: number } | undefined
+  let fence: Fence | undefined
   let listIndent: number | undefined
   let contentIndent = 0
   let htmlCloser: string | undefined
   let codeMayStart = true
   let afterText = false
-  return lines.map(line => {
+  let paragraphDepth = 0
+  // Where each closer string last appears, worked out once at the first opener that needs it, so a block runs past a
+  // blank line only when its closer comes later, and a document of unclosed openers stays linear.
+  let lastClosers: ReadonlyMap<string, number> | undefined
+  const closerLater = (closer: string, index: number): boolean => {
+    lastClosers ??= new Map(HTML_BLOCKS.map(([, end]) => [end, lines.findLastIndex(raw => raw.text.includes(end))]))
+    return (lastClosers.get(closer) ?? -1) >= index
+  }
+  return lines.map((line, index) => {
+    // A fence inside a blockquote runs while its lines keep the quote's markers. A line without them ends the quote, and the fence with it.
+    const quoted = fence && fence.quotes > 0 ? unquote(line.text, fence.quotes) : undefined
+    const indent = columns(/^\s*/.exec(line.text)?.[0] ?? '')
+    if (fence && quoted && (quoted.depth < fence.quotes || indent < (fence.item ?? 0))) {
+      fence = undefined
+      codeMayStart = true
+    }
     if (!fence) {
-      const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)(.*)$/.exec(line.text)
-      // A backtick fence's opening line can't hold another backtick: that's inline code.
-      if (open?.[1] && !(open[1].startsWith('`') && open[3]?.includes('`'))) {
-        fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase(), indent: line.text.search(/\S/) }
-        codeMayStart = false
+      const opening = unquote(line.text, Number.POSITIVE_INFINITY)
+      const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)(.*)$/.exec(opening.text)
+      // A backtick fence's opening line can't hold another backtick: that's inline code. Inside an HTML block a fence is HTML.
+      if (open?.[1] && htmlCloser === undefined && !(open[1].startsWith('`') && open[3]?.includes('`'))) {
+        const item = opening.depth > 0 && listIndent !== undefined && indent >= contentIndent ? { item: contentIndent } : {}
+        fence = { marker: open[1], lang: (open[2] ?? '').toLowerCase(), indent: opening.text.search(/\S/), quotes: opening.depth, ...item }
+        // A quote's marker can end a list, whatever the quote holds.
+        if (opening.depth > 0 && listIndent !== undefined && endsList(line, listIndent)) listIndent = undefined
         afterText = false
         return { ...line, code: { lang: '', fence: true } }
       }
       const blank = line.text.trim() === ''
-      if (!blank && codeMayStart && (listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : columns(/^\s*/.exec(line.text)?.[0] ?? '') >= contentIndent + 4)) return { ...line, code: { lang: INDENTED } }
-      codeMayStart = blank
       const inHtml = htmlCloser !== undefined
-      // A blank line ends any of them. CommonMark lets a comment run on past one, and reading on from there is what `main` did.
-      if (htmlCloser !== undefined && (blank || (htmlCloser !== '' && line.text.includes(htmlCloser)))) htmlCloser = undefined
+      // Inside a quote, indent counts from its markers. A list outside the quote doesn't move that.
+      const deep = opening.depth > 0 ? quotedIndent(line.text) >= 4 : listIndent === undefined ? /^(?: {4}|\t)/.test(line.text) : indent >= contentIndent + 4
+      if (!inHtml && codeMayStart && deep) {
+        if (opening.depth > 0 && listIndent !== undefined && endsList(line, listIndent)) listIndent = undefined
+        return { ...line, code: { lang: INDENTED } }
+      }
+      // A block tag's block ends at a blank line. One of types 1 to 5 ends at its closer, past blank lines when the closer comes
+      // later, and else at the first blank line, so an unclosed opener can't hide the rest of the skill (the owner's choice, 2026-11-05).
+      if (htmlCloser !== undefined && (htmlCloser === '' ? blank : line.text.includes(htmlCloser) || (blank && !closerLater(htmlCloser, index)))) htmlCloser = undefined
       const marked: Line = { ...line, ...(listIndent === undefined ? {} : { inList: true }), ...(afterText ? { afterText } : {}), ...(inHtml ? { inHtml } : {}) }
-      afterText = !blank
+      // A setext underline closes the paragraph above it only at that paragraph's own level, a quote's or an item's content. Anywhere else `===` is lazy text.
+      const underline = afterText && SETEXT.test(opening.text) && opening.depth === paragraphDepth && (listIndent === undefined || indent >= contentIndent)
       // `* * *` and `- - -` have a list marker's shape, and are thematic breaks.
       const item = THEMATIC_BREAK.test(line.text) ? null : ANY_ITEM.exec(line.text)
+      // A paragraph's level is where it starts. A list item or a deeper quote marker starts a new one, and a line at its
+      // level or shallower continues it, lazily when shallower.
+      const continues = afterText && !item && opening.depth <= paragraphDepth
+      afterText = !inHtml && !underline && isParagraph(opening.text)
+      if (afterText && !continues) paragraphDepth = opening.depth
+      // Indented code can start anywhere but in a paragraph, and a fence's close is no paragraph either.
+      codeMayStart = !afterText
       if (item) {
         const marker = columns(item[1] as string)
         const spaces = columns(`${item[1]}${item[2]}`) - marker
@@ -125,12 +184,14 @@ function classify(lines: { text: string; number: number }[]): Line[] {
       return marked
     }
     const current = fence
-    const trimmed = line.text.trim()
+    const text = quoted?.text ?? line.text
+    const trimmed = text.trim()
     if (trimmed.startsWith(current.marker[0] ?? '`') && /^(`{3,}|~{3,})$/.test(trimmed) && trimmed.length >= current.marker.length) {
       fence = undefined
+      codeMayStart = true
       return { ...line, code: { lang: '', fence: true } }
     }
-    return { ...line, code: { lang: current.lang, indent: current.indent } }
+    return { ...line, text, code: { lang: current.lang, indent: current.indent } }
   })
 }
 
@@ -140,6 +201,8 @@ const ORDERED = /^(\s*)\d+[.)]\s+(.*)$/
 const CHECKLIST = /^(\s*)[-*+]\s+\[[ xX]\]\s+(.*)$/
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/
 const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
+/** A setext underline for a level-1 heading. The level-2 form has a thematic break's shape and is read as one. */
+const SETEXT = /^ {0,3}=+[ \t]*$/
 
 /** CommonMark's HTML blocks of types 1 to 5, and what ends each. Type 1 has no closing form here: `</pre>` starts nothing. */
 const HTML_BLOCKS: readonly (readonly [RegExp, string])[] = [
@@ -170,9 +233,16 @@ function opensHtml(text: string): string | undefined {
   return end && text.includes(end) ? undefined : end
 }
 
+const QUOTE = /^ {0,3}>/
+
 /** Whether a line can interrupt a paragraph by starting a block of its own. Fences and list items are read before this. */
 function startsBlock(text: string): boolean {
-  return HEADING.test(text) || THEMATIC_BREAK.test(text) || /^ {0,3}>/.test(text) || htmlEnd(text) !== undefined
+  return HEADING.test(text) || THEMATIC_BREAK.test(text) || QUOTE.test(text) || htmlEnd(text) !== undefined
+}
+
+/** Whether a line, its blockquote markers off, is paragraph text, which the line after it may lazily continue. */
+function isParagraph(text: string): boolean {
+  return text.trim() !== '' && !startsBlock(text)
 }
 
 /**
@@ -256,7 +326,9 @@ function listSteps(lines: Line[], item: RegExp, kind: ParsedStep['kind']): Span[
     const found = itemIn(line)
     if (found && found.indent < top + 2) items.push({ title: title(found.text), index })
     else if (kind === 'checklist' && /^\s*[-*+]\s/.test(line.text)) continue // a plain bullet among the boxes
-    else if (!line.code && (LIST_ITEM.test(line.text) ? line.text.search(/\S/) <= top : endsList(line, top))) {
+    // A fence or indented code in a blockquote is code, and its quote marker still ends a list. Lines inside a fence come
+    // without their quote markers, and one starting with `>` there is the code's own.
+    else if ((!line.code || ((line.code.fence || line.code.lang === INDENTED) && QUOTE.test(line.text))) && (LIST_ITEM.test(line.text) ? line.text.search(/\S/) <= top : endsList(line, top))) {
       last = index
       break
     }
@@ -280,19 +352,21 @@ function rules(lines: Line[]): ParsedRule[] {
   return found
 }
 
-/** A heredoc's terminator. `stripTabs`: opened with `<<-`, so leading tabs don't count. */
-type Heredoc = { word: string; stripTabs: boolean }
+/** A heredoc's terminator. `stripTabs`: opened with `<<-`, so leading tabs don't count. `end`: where its word ends on its line. */
+type Heredoc = { word: string; stripTabs: boolean; end: number }
 
 /**
  * Reads the heredoc opened by the `<<` at `at`: the whole delimiter word, with its
  * quotes and backslashes removed. No word, or an unclosed quote, opens nothing.
- * That covers a here-string too, since `<` can't start a word.
+ * That covers a here-string too, since `<` can't start a word. An empty quoted
+ * word opens one that ends at the first empty line, as bash reads `<<''`.
  */
 function readHeredoc(text: string, at: number, closes: () => ReadonlyMap<number, number>): Heredoc | undefined {
   const stripTabs = text[at + 2] === '-'
   let cursor = at + (stripTabs ? 3 : 2)
   while (text[cursor] === ' ' || text[cursor] === '\t') cursor += 1
   let word = ''
+  let quoted = false
   for (; cursor < text.length; cursor += 1) {
     const char = text[cursor] as string
     // Bash takes `$(…)`, `${…}` and `` `…` `` in a delimiter literally, with whatever they hold.
@@ -310,79 +384,246 @@ function readHeredoc(text: string, at: number, closes: () => ReadonlyMap<number,
     } else if (char === "'" || char === '"') {
       const close = closes().get(cursor) ?? -1
       if (close === -1) return undefined
-      word += text.slice(cursor + 1, close)
+      const inside = text.slice(cursor + 1, close)
+      // In double quotes a backslash escapes only these four; in single quotes it's literal.
+      word += char === '"' ? inside.replace(/\\([\\"$`])/g, '$1') : inside
       cursor = close
+      quoted = true
     } else word += char
   }
-  return word ? { word, stripTabs } : undefined
+  return word || quoted ? { word, stripTabs, end: cursor } : undefined
 }
 
 /**
- * Where each opening on a line closes: a quote or backtick at the next one of its
- * kind, and a `(` or `{` at its matching bracket. One that never closes has no entry.
- * Worked out once per line, so a line of many `<<` stays linear.
+ * Where each opening on a line closes: a quote at the next unescaped one of its
+ * kind, and a `(`, `{` or backtick at its match outside quotes. A backslash
+ * escapes the next character except inside single quotes, and inside quotes
+ * nothing else opens or closes. One that never closes has no entry. Worked out
+ * once per line, so a line of many `<<` stays linear.
  */
 function closers(text: string): ReadonlyMap<number, number> {
   const found = new Map<number, number>()
-  const next: Record<string, number> = {}
-  for (let at = text.length - 1; at >= 0; at -= 1) {
-    const char = text[at] as string
-    if (char !== "'" && char !== '"' && char !== '`') continue
-    if (next[char] !== undefined) found.set(at, next[char])
-    next[char] = at
-  }
-  const open: Record<string, number[]> = { '(': [], '{': [] }
+  const open: Record<string, number[]> = { '(': [], '{': [], '`': [] }
+  let quote: { char: string; at: number } | undefined
   for (let at = 0; at < text.length; at += 1) {
     const char = text[at] as string
-    if (char === '(' || char === '{') open[char]?.push(at)
-    else if (char === ')' || char === '}') {
-      const from = open[char === ')' ? '(' : '{']?.pop()
+    if (char === '\\' && quote?.char !== "'") at += 1
+    else if (quote) {
+      if (char === quote.char) {
+        found.set(quote.at, at)
+        quote = undefined
+      }
+    } else if (char === "'" || char === '"') quote = { char, at }
+    else if (char === '(' || char === '{') open[char]?.push(at)
+    else if (char === '`' && open[char]?.length === 0) open[char]?.push(at)
+    else if (char === ')' || char === '}' || char === '`') {
+      const from = open[char === ')' ? '(' : char === '}' ? '{' : '`']?.pop()
       if (from !== undefined) found.set(from, at)
     }
   }
   return found
 }
 
+/** The words after which a command may still start, as after `if` or `{`. */
+const KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'while', 'until', 'do', 'time', '!', '{'])
+
 /** Leading `VAR=value` words, whose values may hold quoted spaces. An unclosed quote matches nothing. */
 const ENV_PREFIX = /^(?:[A-Za-z_]\w*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'])*\s+)+/
 
 /**
- * One shell line's `&&`, `||` and `;` segments, and the terminators of any
- * heredocs it opens. It reads quotes, comments and arithmetic, and little else:
- * this is not a shell parser. `arithmetic` is the depth still open from the lines
- * before, and it returns the depth open after this one.
+ * A group whose commands are read: a subshell, a substitution where a command starts or that runs on to later lines,
+ * or a case statement, in its subject, a pattern, or the commands after one. One left open is carried to the next line.
  */
-function readShell(text: string, arithmetic: number): { segments: string[]; heredocs: Heredoc[]; arithmetic: number } {
+type Group = { readonly kind: 'subshell' | 'substitution' } | { readonly kind: 'case'; readonly part: 'subject' | 'pattern' | 'body' }
+
+/** The open groups, innermost first. Nothing changes one in place, so a line hands them on without a copy. */
+type Groups = { readonly group: Group; readonly below: Groups } | undefined
+
+/**
+ * What a read leaves open at its end: arithmetic and groups, carried to the next line, and a quote or `$[…]`, carried
+ * only to the next piece of a continued line.
+ */
+type ShellState = { arithmetic: number; quote: string; brackets: number; groups: Groups }
+
+const CLOSED: ShellState = { arithmetic: 0, quote: '', brackets: 0, groups: undefined }
+
+/**
+ * One shell line's commands, split at `&&`, `||` and `;` and at the parentheses
+ * of a subshell, and the terminators of any heredocs it opens. It reads quotes,
+ * comments and arithmetic, and little else: this is not a shell parser.
+ * `from` is what the text before it left open, and it returns what is open after.
+ *
+ * A `)` ends a command only when it closes a group: a subshell or substitution
+ * whose `(` `closers()` pairs with it, one carried from an earlier line, or a case
+ * pattern. Anywhere else it's a character. A substitution closed inside a word,
+ * as in `echo $(npm test)`, is part of that word: nothing in it is split or read.
+ */
+function readShell(text: string, from: ShellState): { segments: string[]; heredocs: Heredoc[]; state: ShellState; comment: boolean } {
   const segments: string[] = []
   const heredocs: Heredoc[] = []
-  let quote = ''
+  let { arithmetic, quote, brackets, groups } = from
   let start = 0
   let end = text.length
   let found: ReadonlyMap<number, number> | undefined
   const closes = (): ReadonlyMap<number, number> => (found ??= closers(text))
-  for (let at = 0; at < end; at += 1) {
-    const char = text[at]
-    if (char === '\\' && quote !== "'") at += 1
-    else if (quote) quote = char === quote ? '' : quote
-    else if (char === '"' || char === "'") quote = char
-    else if (arithmetic > 0) arithmetic += char === '(' ? 1 : char === ')' ? -1 : 0
-    else if (text.startsWith('((', at)) {
-      // Inside $((…)) or ((…)), << is a shift, so nothing there can open a heredoc.
-      arithmetic = 2
-      at += 1
-    } else if (char === '#' && (at === 0 || /\s/.test(text[at - 1] as string))) end = at
-    else if (char === ';' || text.startsWith('&&', at) || text.startsWith('||', at)) {
-      segments.push(text.slice(start, at))
-      start = at + (char === ';' ? 1 : 2)
-      at = start - 1
-    } else if (text.startsWith('<<', at)) {
-      const heredoc = readHeredoc(text, at, closes)
-      if (heredoc) heredocs.push(heredoc)
-      at += 1
+  let closed: ReadonlySet<number> | undefined
+  const isClosed = (at: number): boolean => (closed ??= new Set(closes().values())).has(at)
+  // `((…))` is arithmetic when its inner parenthesis closes right before its outer one, or not on this line. `((a); b)` is two subshells.
+  const isArithmetic = (at: number): boolean => {
+    const inner = closes().get(at + 1)
+    return inner === undefined || text[inner + 1] === ')'
+  }
+  // The groups opened here, by where their `)` is. The innermost open group decides what a `)` ends, so a pattern's `)`
+  // that `closers()` pairs with a subshell's `(` still ends the pattern.
+  const opened = new Set<number>()
+  // The closer of a substitution or backtick inside a word: up to it nothing is syntax but quotes, comments, heredocs and arithmetic.
+  let sealed = -1
+  // Where the word being read began, or -1 between words.
+  let word = -1
+  const top = (): Group | undefined => groups?.group
+  const push = (group: Group): void => {
+    groups = { group, below: groups }
+  }
+  const pop = (): void => {
+    groups = groups?.below
+  }
+  const inPattern = (): boolean => {
+    const group = top()
+    return group?.kind === 'case' && group.part === 'pattern'
+  }
+  // Whether a command may start here: at a line's start, after an operator or a keyword, but not in a case's patterns.
+  let position = !inPattern()
+  const cut = (at: number, next: number): void => {
+    segments.push(text.slice(start, at))
+    start = next
+  }
+  const endWord = (at: number): void => {
+    if (word === -1) return
+    const read = text.slice(word, at)
+    word = -1
+    const group = top()
+    if (group?.kind === 'case' && group.part === 'subject') {
+      if (read === 'in') {
+        pop()
+        push({ kind: 'case', part: 'pattern' })
+      }
+    } else if (group?.kind === 'case' && read === 'esac' && (position || group.part === 'pattern')) {
+      pop()
+      position = false
+    } else if (position && !inPattern()) {
+      if (read === 'case') push({ kind: 'case', part: 'subject' })
+      position = KEYWORDS.has(read)
     }
   }
+  for (let at = 0; at < end; at += 1) {
+    const char = text[at] as string
+    if (char === '\\' && quote !== "'") {
+      if (word === -1) word = at
+      at += 1
+    } else if (quote) quote = char === quote ? '' : quote
+    else if (char === '"' || char === "'") {
+      if (word === -1) word = at
+      quote = char
+    } else if (arithmetic > 0) arithmetic += char === '(' ? 1 : char === ')' ? -1 : 0
+    else if (brackets > 0) brackets += char === '[' ? 1 : char === ']' ? -1 : 0
+    else if (text.startsWith('((', at) && isArithmetic(at)) {
+      // Inside $((…)) or ((…)), << is a shift, so nothing there can open a heredoc.
+      if (word === -1) word = at
+      arithmetic = 2
+      at += 1
+    } else if (text.startsWith('$[', at)) {
+      // `$[…]` is bash's older arithmetic, so << there is a shift too. A bare `[` is the test command, and `${a[1]}` an index.
+      if (word === -1) word = at
+      brackets = 1
+      at += 1
+    } else if (char === '#' && (at === 0 || /\s/.test(text[at - 1] as string))) end = at
+    else if (text.startsWith('<<', at)) {
+      endWord(at)
+      const heredoc = readHeredoc(text, at, closes)
+      if (heredoc) heredocs.push(heredoc)
+      // The word is bash's to take literally, so none of its `;`, `&&` or `((` is read as syntax.
+      at = heredoc ? heredoc.end - 1 : at + 1
+    } else if (at < sealed) continue
+    else if (text.startsWith('${', at) && closes().has(at + 1)) {
+      // A parameter's `${…}` is one piece of its word, whatever `)` or `;` it holds.
+      if (word === -1) word = at
+      at = closes().get(at + 1) as number
+    } else if (char === '`' && closes().has(at)) {
+      if (word === -1) word = at
+      sealed = closes().get(at) as number
+    } else if (char === '(') {
+      const close = closes().get(at)
+      const before = text[at - 1] ?? ''
+      if (/[$<>]/.test(before)) {
+        // `$(`, `<(` and `>(` substitute into the command around them. Where a command starts, or run on to later
+        // lines, their commands are read; closed inside a word, they're part of it. A `<` or `>` never starts a word, so
+        // only a `$(` can start a command.
+        const commandStart = position && word === at - 1
+        if (close !== undefined && !commandStart) sealed = close
+        else {
+          if (commandStart) cut(at - 1, at + 1)
+          push({ kind: 'substitution' })
+          if (close !== undefined) opened.add(close)
+          word = -1
+          position = true
+        }
+      } else if (inPattern()) {
+        // A case pattern's own opening parenthesis: its closer ends the pattern.
+        endWord(at)
+        if (close !== undefined) opened.add(close)
+      } else {
+        endWord(at)
+        // A `(` where a command may start opens a subshell, and neither of its parentheses is part of what runs inside.
+        // Anywhere else, as in a diagram, it's a character like any other.
+        if (position) {
+          cut(at, at + 1)
+          push({ kind: 'subshell' })
+          if (close !== undefined) opened.add(close)
+        }
+      }
+    } else if (char === ')') {
+      endWord(at)
+      const group = top()
+      // A `)` that closes a `(` which opened nothing, as in a diagram, ends nothing either.
+      if (group === undefined || (!opened.has(at) && isClosed(at))) continue
+      if (group.kind === 'case') {
+        if (group.part !== 'pattern') continue
+        cut(at, at + 1)
+        pop()
+        push({ kind: 'case', part: 'body' })
+        position = true
+      } else {
+        pop()
+        // What follows keeps the `)`, so it reads as no command: after a subshell only an operator may come, and after a
+        // substitution the rest of the word it sat in.
+        cut(at, at)
+        position = false
+      }
+    } else if (char === ';' || text.startsWith('&&', at) || text.startsWith('||', at)) {
+      endWord(at)
+      const group = top()
+      // `;;`, `;&` and `;;&` end a case's commands, and a pattern comes next. The `&` of `;;&` then starts nothing.
+      const clause = group?.kind === 'case' && group.part === 'body' && /^;[;&]/.test(text.slice(at, at + 2))
+      if (clause) {
+        pop()
+        push({ kind: 'case', part: 'pattern' })
+      }
+      cut(at, at + (clause || char !== ';' ? 2 : 1))
+      position = !inPattern()
+      at = start - 1
+    } else if (char === '|' || char === '&') {
+      // A command may start after a pipe or a background `&`. A `(` straight after a redirection's `>&` is no shell at all.
+      endWord(at)
+      position = !inPattern()
+    } else if (/[\s<>]/.test(char)) endWord(at)
+    else if (word === -1) word = at
+  }
+  endWord(end)
+  // `case` with no `in` on its line opens nothing, so a stray word in prose can't make `)` end commands.
+  const last = top()
+  if (last?.kind === 'case' && last.part === 'subject') pop()
   segments.push(text.slice(start, end))
-  return { segments, heredocs, arithmetic }
+  return { segments, heredocs, state: { arithmetic, quote, brackets, groups }, comment: end < text.length }
 }
 
 /** Counted from the end, because a regex retries from every backslash in a long run and goes quadratic. */
@@ -395,16 +636,18 @@ function trailingBackslashes(text: string): number {
 function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
   const found: VerifyCandidate[] = []
   const seen = new Set<string>()
-  let pending: { text: string; line: number } | undefined
+  // A continued line's pieces so far, each without its backslash, and what the last of them left open.
+  let pending: { pieces: string[]; line: number; state: ShellState } | undefined
   let heredocs: Heredoc[] = []
-  let arithmetic = 0
+  // What the lines before left open: arithmetic and groups, never a quote or `$[…]`.
+  let open = CLOSED
   for (const line of lines) {
     const fence = line.code?.fence === true
     if (fence) {
       // A code block's end ends whatever was still open in it.
       pending = undefined
       heredocs = []
-      arithmetic = 0
+      open = CLOSED
     }
     if (!line.code || !SHELLS.has(line.code.lang) || fence) continue
     const heredoc = heredocs[0]
@@ -415,17 +658,23 @@ function commands(lines: Line[], spans: Span[]): VerifyCandidate[] {
       continue
     }
     const text = line.text.trim().replace(/^\$\s+/, '')
-    const joined = pending ? `${pending.text} ${text}` : text
     const at = pending?.line ?? line.number
-    // An even run is literal backslashes, so only an odd one continues the line.
-    if (trailingBackslashes(joined) % 2 === 1) {
-      pending = { text: joined.slice(0, -1).trim(), line: at }
+    // Only this piece is read to see whether it goes on: a comment in an earlier one would have ended it. A comment ends
+    // at its newline, so a backslash inside one continues nothing. Elsewhere an odd run continues the line, and an even
+    // run is literal backslashes.
+    const piece = readShell(text, pending?.state ?? open)
+    if (!piece.comment && trailingBackslashes(text) % 2 === 1) {
+      pending ??= { pieces: [], line: at, state: piece.state }
+      pending.state = piece.state
+      const kept = text.slice(0, -1).trim()
+      if (kept) pending.pieces.push(kept)
       continue
     }
+    // The joined line is read once, whole, when it ends.
+    const shell = pending ? readShell(`${pending.pieces.join(' ')} ${text}`, open) : piece
     pending = undefined
-    const shell = readShell(joined, arithmetic)
     heredocs = shell.heredocs
-    arithmetic = shell.arithmetic
+    open = { ...shell.state, quote: '', brackets: 0 }
     for (const segment of shell.segments) {
       const command = segment.trim().replace(ENV_PREFIX, '')
       if (!VERIFY.some(pattern => pattern.test(command))) continue
