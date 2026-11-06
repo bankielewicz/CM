@@ -478,6 +478,20 @@ test('a /clear starts the captures over: only the skill loaded after it is held'
   expect(all.map(capture => capture.skill)).toEqual(['after'])
 })
 
+test("a session.end while a skill's override file is read keeps that skill out of the list it starts", async ($, on) => {
+  const world = engine(on, { holdFirstRead: true })
+  await start($)
+  const loading = expand($, 'before')
+  await until(world, () => world.readHeld)
+  await $.session.end(CLEAR)
+  world.releaseRead()
+  await loading
+  await expand($, 'after')
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill)).toEqual(['after'])
+})
+
 test('every session.end starts the captures over, whatever its reason', async ($, on) => {
   const world = engine(on)
   await start($)

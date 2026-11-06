@@ -29,6 +29,10 @@ export const register: Register = (on, options) => {
   // also keeps it clear of `update`, which retries on a read the docs say is one
   // moment per dispatch. It's current once `saves` is idle, not when a hook answers.
   let captured: SkillCapture[] | undefined
+  // Advanced by each session.end. A skill whose load began before one, as when the
+  // session ends while its override file is read, belongs to the session that ended,
+  // so its save writes nothing into the list the reset starts.
+  let generation = 0
 
   // Notes an event for the self-check. It never waits on the store.
   const seen = (event: WatchedEvent): void => selfCheck.note(event)
@@ -60,6 +64,7 @@ export const register: Register = (on, options) => {
   // the old list, and if it fails the held list is still empty.
   on('session.end', ($, e, next) => {
     seen('session.end')
+    generation += 1
     saves.add(async () => {
       captured = []
       try {
@@ -123,6 +128,7 @@ export const register: Register = (on, options) => {
 
   on('skill.prompt', async ($, e, next) => {
     seen('skill.prompt')
+    const began = generation
     // Worked out first: the windows that say who loaded it are open now.
     const { loop, via } = e.frontmatter.context === 'fork' ? UNATTRIBUTED : skills.attribute(e.skill)
     // P1.3: the declared contract. This hook waits for it, because it's what P1.4
@@ -148,6 +154,7 @@ export const register: Register = (on, options) => {
     // the engine holds the skill's load, and the agent's first model request, until
     // this hook does.
     saves.add(async () => {
+      if (generation !== began) return
       try {
         const capture: SkillCapture = {
           skill: e.skill,

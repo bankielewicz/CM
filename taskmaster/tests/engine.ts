@@ -30,7 +30,11 @@ export type World = {
   stateHeld: boolean
   /** Lets the first `$.state` write finish, when `holdFirstStateWrite` held it. */
   releaseState: () => void
-  /** Called after each `$.state` write and each `$.ui.log` line. */
+  /** True once `holdFirstRead` is holding a read. */
+  readHeld: boolean
+  /** Lets the first `$.fs.read` answer, when `holdFirstRead` held it. */
+  releaseRead: () => void
+  /** Called after each `$.state` write and each `$.ui.log` line, and when a read is held. */
   onChange: (() => void)[]
 }
 
@@ -83,6 +87,8 @@ export type EngineOptions = {
   seedState?: Record<string, unknown>
   /** Files `$.fs.read` can read, by absolute path. Any other read fails, as a missing file does. */
   files?: Record<string, string>
+  /** The first `$.fs.read` waits until `world.releaseRead()`, as a slow disk would. */
+  holdFirstRead?: boolean
 }
 
 // Nothing sits beneath the plugin in a test: these hooks stand for the
@@ -102,6 +108,11 @@ export function engine(on: On, options: EngineOptions = {}): World {
   const stateReleased = new Promise<void>(resolve => {
     releaseState = resolve
   })
+  let heldRead = options.holdFirstRead ?? false
+  let releaseRead: () => void = () => {}
+  const readReleased = new Promise<void>(resolve => {
+    releaseRead = resolve
+  })
   const world: World = {
     saved: new Map(Object.entries(options.seed ?? {})),
     writes: [],
@@ -114,6 +125,8 @@ export function engine(on: On, options: EngineOptions = {}): World {
     logs: [],
     stateHeld: false,
     releaseState: () => releaseState(),
+    readHeld: false,
+    releaseRead: () => releaseRead(),
     onChange: [],
   }
   const reach = (event: WatchedEvent): void => {
@@ -175,8 +188,14 @@ export function engine(on: On, options: EngineOptions = {}): World {
     return { value: undefined }
   })
   on('session.root', () => ({ value: '/repo' }))
-  on('fs.read', (_, e) => {
+  on('fs.read', async (_, e) => {
     world.reads.push(e.path)
+    if (heldRead) {
+      heldRead = false
+      world.readHeld = true
+      changed()
+      await readReleased
+    }
     const text = options.files?.[e.path]
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
