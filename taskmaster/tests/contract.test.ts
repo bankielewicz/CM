@@ -209,11 +209,17 @@ test('the order is frontmatter, then override, then the model, then the parse', 
   expect(pickTier({ declared: declared('none'), llm: false, heuristic: false })).toBe('none')
 })
 
-test('an override file is named after the skill, with anything but letters, digits, dot, dash and underscore made safe', () => {
+// The owner chose plugin-as-folder on 2026-11-06 and approved changing this test's assertions, which named acme_notes.json.
+test("an override file is named after the skill, a plugin's name as its folder, and only from parts that can't collide or leave the folder", () => {
   expect(overrideFile('notes')).toBe('notes.json')
-  expect(overrideFile('acme:notes')).toBe('acme_notes.json')
-  expect(overrideFile('../../etc/passwd')).toBe('.._.._etc_passwd.json')
-  expect(overrideFile('a b')).toBe('a_b.json')
+  expect(overrideFile('acme:notes')).toBe('acme/notes.json')
+  expect(overrideFile('../../etc/passwd')).toBeUndefined()
+  expect(overrideFile('a b')).toBeUndefined()
+  // Names that shared a file under the old rule now have one each, or none.
+  expect(overrideFile('a_b')).toBe('a_b.json')
+  expect(overrideFile('a:b')).toBe('a/b.json')
+  expect(overrideFile('a:b:c')).toBe('a/b/c.json')
+  for (const name of ['é', 'ü', '.hidden', '-x', 'acme:', ':notes', 'acme:..', '']) expect(overrideFile(name)).toBeUndefined()
 })
 
 // ------------------------------------------------------------ in a session
@@ -257,6 +263,26 @@ test('a skill with no block reads its override file from the project\'s override
 
   expect(world.reads).toEqual([OVERRIDE_PATH])
   expect((await captured(world))?.declared).toEqual({ source: 'override', contract: CONTRACT, problems: [] })
+})
+
+test("a plugin's skill reads its override file from its plugin's folder", async ($, on) => {
+  const world = await session($, on, { files: { '/repo/.taskmaster/overrides/acme/notes.json': JSON.stringify(BLOCK) } })
+  await $.skill.prompt({ skill: 'acme:notes', text: '1. Write the note.', frontmatter: {}, source: 'plugin', pluginName: 'acme' })
+
+  expect((await captured(world))?.declared).toEqual({ source: 'override', contract: CONTRACT, problems: [] })
+  expect(world.reads).toEqual(['/repo/.taskmaster/overrides/acme/notes.json'])
+})
+
+test("a skill whose name can't name a file reads no override, and the debug log says why", async ($, on) => {
+  const world = await session($, on)
+  await $.skill.prompt({ skill: '../notes', text: '1. Write the note.', frontmatter: {}, source: 'projectSettings' })
+
+  const declared = (await captured(world))?.declared
+  expect(declared?.source).toBe('none')
+  expect(declared?.problems.map(problem => problem.where)).toEqual(['override'])
+  expect(declared?.problems[0]?.message).toMatch(/"\.\.\/notes" can't name an override file/)
+  expect(world.reads).toEqual([])
+  expect(world.logs.map(line => line.to)).toEqual(['debug'])
 })
 
 test('the override folder comes from the settings', { options: { overrideDir: 'state/overrides' } }, async ($, on) => {

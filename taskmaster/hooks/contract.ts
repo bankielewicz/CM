@@ -160,9 +160,23 @@ export function resolveDeclared(frontmatter: Tier, override?: Tier): DeclaredRes
   return { source: 'none', problems }
 }
 
-/** The override file for a skill: its name with anything but letters, digits, `.`, `-` and `_` made `_`. */
-export function overrideFile(skill: string): string {
-  return `${skill.replace(/[^A-Za-z0-9._-]/g, '_')}.json`
+/** A part of a skill's name that can name an override file: it can't collide with another, or leave the folder. */
+const FILE_PART = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/**
+ * The override file for a skill, under the override folder: `notes.json`, and for a plugin's `acme:notes`,
+ * `acme/notes.json` (owner, 2026-11-06). Each part of the name must be letters, digits, `.`, `-` or `_`, starting with a
+ * letter or digit, so no two names share a file and none leaves the folder. Any other name has none.
+ */
+export function overrideFile(skill: string): string | undefined {
+  const parts = skill.split(':')
+  return parts.every(part => FILE_PART.test(part)) ? `${parts.join('/')}.json` : undefined
+}
+
+/** The override tier of a skill whose name can't name a file: none is read, and the problem says why. */
+export function unnamedOverride(skill: string): Tier {
+  const message = `"${skill}" can't name an override file, so none is read: each part of the name needs letters, digits, ., - or _, starting with a letter or digit`
+  return { problems: [{ where: 'override', message }] }
 }
 
 /**

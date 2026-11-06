@@ -10,7 +10,7 @@ import type { Register } from 'claude-code'
 import type { Io, SkillCapture, WatchedEvent } from '../types'
 import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
-import { fromFrontmatter, fromOverride, overrideFile, resolveDeclared } from './contract'
+import { fromFrontmatter, fromOverride, overrideFile, resolveDeclared, unnamedOverride } from './contract'
 import type { Tier } from './contract'
 import { contentHash, keepLatest, reason, SaveQueue, SKILLS_SHAPE, SkillTracker, UNATTRIBUTED } from './skills'
 
@@ -137,20 +137,24 @@ export const register: Register = (on, options) => {
         const frontmatter = fromFrontmatter(e.frontmatter, e.frontmatterProblem)
         let override: Tier | undefined
         if (!frontmatter.contract) {
+          // A name that can't name a file reads none, and the problem says why.
+          const name = overrideFile(e.skill)
           let file: string | undefined
           let path: string | undefined
           let unreadable: string | undefined
-          try {
-            const root = (await $.session.root()).replace(/\/+$/, '')
-            path = `${root}/${config.overrideDir}/${overrideFile(e.skill)}`
-            file = await $.fs.read(path)
-          } catch (error) {
-            // A missing file declares nothing. One that's there but can't be read, or a path that can't be worked out,
-            // is set aside with its reason, so a stricter contract isn't lost without a word.
-            const missing = path !== undefined && !(await $.fs.exists(path).catch(() => true))
-            if (!missing) unreadable = reason(error)
+          if (name !== undefined) {
+            try {
+              const root = (await $.session.root()).replace(/\/+$/, '')
+              path = `${root}/${config.overrideDir}/${name}`
+              file = await $.fs.read(path)
+            } catch (error) {
+              // A missing file declares nothing. One that's there but can't be read, or a path that can't be worked out,
+              // is set aside with its reason, so a stricter contract isn't lost without a word.
+              const missing = path !== undefined && !(await $.fs.exists(path).catch(() => true))
+              if (!missing) unreadable = reason(error)
+            }
           }
-          override = fromOverride(file, unreadable)
+          override = name === undefined ? unnamedOverride(e.skill) : fromOverride(file, unreadable)
         }
         const declared = resolveDeclared(frontmatter, override)
         for (const problem of declared.problems) {
