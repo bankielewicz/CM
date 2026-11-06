@@ -27,6 +27,10 @@ Report the commands with their output. `main` is protected, so each task (or a s
 2. **Legitimate waits (P1.10, P1.17).** Phase 1 recognises a wait from `taskmaster_await_user`, or from a trailing "?" on the last message (F5's fast pre-check). A stop that a trailing "?" lets through is listed in the summary below the answer, so a question can't hide a skipped step. The `$.model.classify` fallback arrives with Phase 2's question detection.
 3. **The spike (P1.0b).** Delete it, in the two PRs and the order P1.0b gives.
 4. **`sentimentClassifier` waits** (PR #6 review). It's F13.3's optional label of your next prompt after a block. No Phase 1 task builds it, and a privacy setting that does nothing would mislead, so it isn't a setting yet. It comes back with the task that builds it.
+5. **Override files are JSON** (2026-11-04, for P1.3). The mod API has no YAML parser, so `.taskmaster/overrides/<skill>.json` holds the `taskmaster:` block's object (plan F1.9).
+6. **A personal layer beside the project file, protected against Claude** (2026-11-04). Personal overrides go in `$.store`, keyed by repository and skill. No change made by Claude loosens a contract without the person's yes. Decision 7 settles which layer wins. **Still open:** whether an override may beat a third-party skill's own frontmatter (P1.7b).
+7. **The personal layer wins, and the project file is read live** (2026-11-04). The mod takes the person's `$.store` entry first. When there is none, as in a fresh cloud container or on a teammate's machine, it reads the project file, every time: nothing copies the file into the store, so a change to the file reaches everyone without a personal entry. The file is opt-in, written by a person to share a contract (plan F1.9).
+8. **A project file that matches the default branch can count as reviewed** (2026-11-04). This needs the repository to run the override guard: a CI check that holds a pull request changing an override file until the owner approves it in a GitHub environment (plan F17.1). The mod can't tell whether a repository runs it, so the trust is opt-in, `overrideTrust: default-branch`. The default, `ask`, asks about a loosening file once per file version and store (P1.7c).
 
 ## M0. Scaffold
 - [x] P1.0 **Scaffold the mod** (F12, F14). **Done: merged in PR #6.** Create `taskmaster/.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`, `types/` and `tests/`, with a test `engine()` helper like the spike's. Add the Phase 1 keys of `userConfig` (F12). At `session.start`, build the `Io` table and flush buffered early events. A startup self-check logs which events fired on this build (F14).
@@ -196,7 +200,39 @@ Report the commands with their output. `main` is protected, so each task (or a s
       - A list keeps the lines between its marker's indent and its content's (#17). With a quoted fence there, that can give a second step.
       - The quoted-string limit stands: a quote left open at a line's end isn't carried to the next line. Carrying it fixes 93 of 4,000 random bash blocks exactly, regresses none and changes no real skill, so it's a candidate for #17 or the next PR.
     - **Freeze:** this was #19's one review round, its first Codex pass plus a cold `/code-review` (owner, 2026-11-05). It takes no more code. Findings after it go to #17 or the next PR under the same policy.
-- [ ] P1.3 **Frontmatter and overrides** (F1.7, F1.9). **Waiting on the owner: how to read override files.** The mod API has no YAML parser (2.1.317's `claude-code.d.ts` mentions YAML only for frontmatter, which `skill.prompt` hands over already parsed), and a mod has no Node or npm packages. Options: vendor a small YAML parser (its whole source then falls under the 95% gate), keep overrides as JSON (`.taskmaster/overrides/<skill>.json`, changing F1.9), or read a strict YAML subset. The frontmatter half of this task needs no parser. Parse and schema-validate the `taskmaster:` block, and read `.taskmaster/overrides/<skill>.yaml`. Precedence is frontmatter, then override, then LLM, then heuristics (principle 1). **Red:** invalid frontmatter falls back with a logged reason, and an override beats extraction. *Depends on P1.2.*
+- [x] P1.3 **Frontmatter and overrides** (F1.7, F1.9). **Done: PR #10.** Parse and schema-validate the `taskmaster:` block, and read the skill's override file, `.taskmaster/overrides/<skill>.json` (owner decision 5). Precedence is frontmatter, then override, then LLM, then heuristics (principle 1). **Red:** invalid frontmatter falls back with a logged reason, and an override beats extraction. *Depends on P1.2.*
+  **Status (2026-11-04):**
+  - `hooks/contract.ts` validates a declared contract strictly and all-or-nothing, so an invalid one is never half-used. It checks known keys, version 1, the three modes, step ids (well-formed and unique), titles, `mandatory`, `when`, exactly one verify kind with a whole-number `exit`, `confirm_before` naming real steps, and provenance.
+  - **The frontmatter tier is skipped when the engine sets `frontmatterProblem`.** Its own docs leave refusing such a skill to the hook, and a dropped frontmatter would otherwise lose a `taskmaster:` block silently.
+  - **`skill.prompt` reads the override file** (`<root>/<overrideDir>/<overrideFile(skill)>`) only when the frontmatter gives no contract. Since the review round below, its queued save does, after the hook answers, and a plugin's skill reads `acme/notes.json`. It stores the result as the capture's `declared`, and logs each set-aside contract to the **debug** log only. The capture shape is now `skills-3`.
+  - **`pickTier`** holds principle 1's full order, unwired, with the model tier's slot for P1.4. P1.4 also names `contract_source`.
+  - **Tests:** 44 new, and `hooks/contract.ts` has 100% coverage of lines and functions. Seven mutants each fail their own test: the precedence order (twice), all-or-nothing, reading only when needed, the debug destination, `frontmatterProblem`, and file-name safety.
+  - **Checked live:** a real `notes.json` override gave `source: override` with its contract. A skill with `mode: loud` gave `none`, with its reason and a debug-log line, and showed nothing.
+  - **Fix round (2026-11-05, after #19 merged, with `main` merged in at `2f1f41b`):** issues #15 and #12, each test-first in its own commit, as the owner decided on 2026-11-04.
+    - **#15, Codex's P2 ([r4471635625](https://github.com/bankielewicz/CM/pull/10#discussion_r4471635625)):** a `session.end` during the override read no longer puts the ended session's skill into the list its reset starts (`8895b6f`, replaced in the review round below). A generation counter does it: `session.end` advances it, `skill.prompt` reads it at the top of the hook, and the queued save writes nothing if it has changed. The test engine gains `holdFirstRead`.
+    - **#12:** any `frontmatterProblem` now leaves a skill unattributed, because flagged frontmatter may have lost the `context: fork` that keeps a forked skill out of the caller's loop (`fc6134f`). That's the owner's decision of 2026-11-04, so it doesn't wait on the live probe.
+    - **Tests:** 2 new, 304 in all. Each failed before its fix for the expected reason. Six mutants each fail a test: three on the counter, including reading it after the override read, and three on the guard.
+  - **Review round (2026-11-06, the cold `/code-review` of `ff8f228`):** 12 findings, all #10's own. The owner answered findings 3, 4 and 6 on 2026-11-06. Each fix is test-first in its own commit.
+    - **Finding 2:** an override file that's there but can't be read, or a path that can't be worked out, is set aside with its reason (`dddf4de`). A missing file still declares nothing and logs nothing. `$.fs.exists` tells the two apart after a failed read.
+    - **Findings 8 to 12, `contract.ts`:** a blank `mode:` is rejected like any other blank key (`eb72ee7`). A verify `exit` must be 0 to 255 (`4e651a4`). A byte-order mark before the JSON is dropped (`001133a`). Only a higher version number is called newer, and anything else is told "version must be the number 1" (`88cd76b`). `confirm_before` names each step once, and a step rejected for its own problem isn't reported again as missing (`05a367a`).
+    - **Findings 1 and 6, option B:** the contract is read in the queued save, after the hook answers, so captures keep their load order (`92a7a58`). The hook waits on nothing it doesn't need to answer, as CLAUDE.md requires. P1.5, whose footer is built from the contract, moves the read back into the hook. Saving in load order also covers #15: a `session.end` during the read queues its reset behind the save. So #15's generation counter is removed, and its test passes unchanged. A hung read stalls later saves, as a hung `$.state` write already does, and holds up no skill.
+    - **Finding 4:** `mode: off` needs no steps (`9584628`). `steps: []` stays accepted.
+    - **Finding 3, plugin-as-folder:** `acme:notes` reads `acme/notes.json`, and `notes` reads `notes.json` (`119de7f`). Each part of a name must be letters, digits, `.`, `-` or `_`, starting with a letter or digit, so no two names share a file and none leaves the folder. Any other name reads none, with a debug line. The owner approved changing the naming test's assertions. On a case-insensitive disk, `Notes` and `notes` still share a file.
+    - **Docs for later, recorded:** finding 5 in plan F1.9, that one skill may load as `notes` or `acme:notes` and read a different file, unchecked live. Finding 7 in P1.7c and plan F17.1: the guard's pattern now holds the override folder itself and any folder above it, so a pull request can't swap one for a link, as well as files at any depth such as `acme/notes.json`.
+    - **Tests:** 15 new and 1 rewritten, 319 in all. Run against each fix's parent, 15 of the 16 failed for the expected reason. The other is a guard that 0 and 255 stay valid exits. 28 mutants across the fixes each fail a test, apart from 2 in finding 11 that are equivalent: one drops a `typeof` check the typecheck needs, and one moves a bound the outer check already rules out.
+  - **Decided (owner, 2026-11-06):** an override beats a skill's frontmatter, whatever its source, with no setting, except a `policySettings` skill, which keeps its valid frontmatter first. F16.6's write targets stay. P1.4 builds it. P1.3 as merged still puts frontmatter first.
+  - **Checked in an interactive terminal (2026-11-06, on 2.1.319, at `c7fca72`):** loaded with `claude --model haiku --debug-file <log> --plugin-dir`. Two more plugins were loaded with it: a read-out mod that recorded `taskmaster.skills` after each turn, and a scratch plugin, `acme`. In a scratch project the owner typed eight skills, then `/clear` and one more. Nothing from the mod showed in the terminal: each reply was the model's `OK`.
+    - **The read-out matched P1.3 in every case:**
+      - a valid block, with an override file that didn't win,
+      - `mode: off` with no steps,
+      - an invalid block falling through to its override,
+      - a project override,
+      - an override that isn't JSON,
+      - one that can't be read, whose problem carried the engine's own `EACCES`,
+      - no contract,
+      - a plugin's `acme:notes` reading `acme/notes.json`.
+    - **The debug log** shows the mod loaded, its three expected debug lines, nothing sent to the transcript, and no failed or skipped hook. After `/clear`, the list held only the skill loaded after it.
+    - A headless dry run of the same eight passed first. The runbook and its kit stay with the session's scratch files, out of the repository, because a mod folder there would count toward the coverage gate.
 - [ ] P1.4 **Cached extraction and enforcement level** (F1.3, F1.4). One Haiku call returns JSON that is validated against a schema and cached in `$.store` by path + hash. If the call fails, the F1.2 result is used. The level is `enforce`, `advisory` or `none`: `none` for reference and persona skills and for `exemptSkills`. **Red:**
   - **The cache key** (found in P1.1, checked live on 2.1.317). `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, and a typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. So P1.1's capture `hash` changes with the skill's folder and with every argument. Key the cache on a hash of the body alone (header and `ARGUMENTS` block removed), with the path, or on the file's own content. A skill whose body has `$ARGUMENTS` takes the words into the body, where they can't be stripped (seen live on 2.1.318), so only the file's content is stable for those. The capture keeps no text, so take it from `e.text` in the hook.
   - **A design question for the agreement rule (PR #9's review).** Heading steps always win over a list, so a single `## 1. Prerequisites` heading hides a real numbered list: the parse gives one step where the model may find many. Decide whether the agreement rule absorbs that, since the two disagree and the skill stays `advisory`, or the parse's precedence has to change. The parse keeps it as is for now (owner's decision, 2026-11-04).
@@ -204,6 +240,9 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - a failed call yields the F1.2 result as `advisory`,
   - high confidence that disagrees with the parse stays `advisory`.
 
+  - **The declared order (owner, 2026-11-06).** An override beats a skill's frontmatter, whatever its source, with no setting. So `resolveDeclared` puts the override first, and the override file is read whatever the frontmatter declares. F16.6's write targets stay, with the two consequences plan F16.6 lists.
+    - **The `policySettings` carve-out (owner, 2026-11-06).** A skill an organisation manages keeps its valid frontmatter first, so a user's or a repository's override can't loosen a mandated workflow. Its override applies only where that block is missing or invalid, so its file needn't be read when the block is valid.
+    - **Red:** an override beats a valid block, and a block alone still applies. A `policySettings` skill's valid block beats its override, while an invalid one falls through to it.
   *Depends on P1.3.*
 - [ ] P1.5 **Protocol footer and task seeding** (F1.5, F1.6). Append the footer (about 10 lines) with namespaced step ids (`skill:S#`) and the three tools. Seed one task per step with `$.tool.call(TaskCreate)` (spike: `seed-task`). **Red:** the footer lists every step id and the three tools, seeded tasks carry `[S#]`, and a `none` contract gets no footer. *Depends on P1.4. With P1.17, covers DoD 1.*
 
@@ -219,14 +258,47 @@ Report the commands with their output. `main` is protected, so each task (or a s
 - [ ] P1.7 **The three tools** (F3). `taskmaster_waive`, `taskmaster_await_user` and `taskmaster_checkpoint`, each registered with `isDeferred: false`. At `strict`, a waiver needs the user's yes through `$.ui.ask`. **Red:** each tool updates the run state, and a strict-mode waiver without a yes is refused. *Depends on P1.6.*
 
 ## M3. Gates (F4 G1–G3, F5, §6)
+- [ ] P1.7b **Guard the contract's levers, and add the personal layer** (F17, F1.8, F1.9; owner decisions 6 and 7). This must land before the gates enforce anything, and P1.8–P1.10 depend on it.
+  - **Protected paths:**
+    - `<root>/<overrideDir>/**`,
+    - the mod's `$.store` file (`~/.claude/plugins/store/taskmaster*`),
+    - a project skill's `taskmaster:` key,
+    - settings files where a write touches the mod's `pluginConfigs`.
+  - **The guard:** `tool.check` answers `ask` for `Write`, `Edit` and `NotebookEdit` on a protected path. It also answers `ask`, as a best effort, for non-read-only `Bash` that names a protected path, and for `Bash` that starts a nested `claude`, which could type a command and answer its dialog.
+  - **Freeze and approval:** a run keeps the contract it started with. A change that loosens a contract (as F17 defines it) applies only after the person's yes in `$.ui.ask`, and never in a `-p` run. A change that only tightens applies at once.
+  - **The two layers** (owner decision 7):
+    - The order: the person's `$.store` entry, keyed by repository and skill, then the project file, read each time there's no entry. Nothing copies the file into the store.
+    - The personal layer is written only by a typed `/taskmaster` command or after `$.ui.ask`. Its session copy lives in `$.state`, so a store that differs from the mod's last write in the same session is ignored and files an incident. Across sessions only the guard protects it (F17, mechanism 5).
+    - A project file that loosens the contract it replaces needs the person's yes. The yes is kept in `$.store`, keyed by repository, skill and the file's hash, so a changed file asks again, and so does a fresh cloud container. P1.7c adds `overrideTrust: default-branch`.
+  - **Visibility:** the source of each override is recorded for P1.17's summary, and a loosened contract is flagged. A tool call that touches a protected path is recorded for P1.21's *model gaming* tripwire.
+  - **Claude-facing text** never mentions overrides or the personal layer. A refused write says to ask the person, or to use `taskmaster_waive`.
+  - **Decided (owner, 2026-11-06):** an override beats a skill's own frontmatter, whatever its source, except a `policySettings` skill, which keeps its valid frontmatter first. P1.4 builds the order. Decision 7 settled which layer wins. So a loosening check here compares an override with the frontmatter it now replaces, as well as with another layer.
+  - **Checked live:** a command typed in the Claude app carries `origin: { kind: 'composer' }` (the `/tm-origin` probe, 2026-11-04). **Still to check live:** a plugin's `ask` in bypass mode.
+- [ ] P1.7c **Trust the default branch, behind the override guard** (F17.1, F12; owner decision 8).
+  - **The template:** ship F17.1's workflow as `taskmaster/templates/override-guard.yml`, with its setup steps in the README.
+  - **The setting:** `overrideTrust`, `ask` (the default) or `default-branch`, in `DEFAULTS`, `userConfig` and the F12 test.
+  - **The pattern:** the template holds a pull request that changes a file under `overrideDir` at any depth, such as a plugin's `acme/notes.json`, and one that changes the folder itself or any folder above it, since swapping either for a link would bring in other files unseen (review of #10, finding 7). F17.1's template does this, checked in bash on 2026-11-06.
+  - **The check:** with `default-branch`, a project file whose content matches the default branch's version applies without asking. The mod fetches the default branch itself, so a moved local ref can't fake a match. Any other file goes through P1.7b's approval. This task decides where the fetch runs: a hook doesn't wait on slow work, so perhaps once at `session.start`, kept for the session.
+  - **The guard grows:** with `default-branch`, `Bash` that runs `git remote set-url` or `git update-ref`, or writes under `.git/`, goes to a person, as a best effort. A fresh fetch defeats a moved ref, not a redirected remote.
+  - **Red:** a matching file applies without `$.ui.ask`. A file that differs, or a failed fetch, asks. With `ask`, a matching file still asks, unless the store already keeps a yes for that file version. The guard asks for `git update-ref`.
+  - **The owner's step, for this repository:** add the workflow under `.github/workflows/` with `gate-guard` lifted, create the `taskmaster-overrides` environment, and make both jobs required checks once the file is on `main`. The deny rule F17.1 suggests goes in `.claude/settings.json`, which is also the owner's to edit.
+  - *Depends on P1.7b. The gates don't depend on it, because `ask`, the default, is safe without it.*
+
+  **Red:**
+  - each guarded write gets `ask`, and an unguarded one doesn't,
+  - a loosening override is ignored without a yes, and a tightening one applies,
+  - a store edited behind the mod's back is ignored and recorded,
+  - the frozen contract survives a mid-run override edit.
+
+  *Depends on P1.6 and P1.3.*
 - [ ] P1.8 **G1: completion gate** (F4, F8.4). Deny `TaskUpdate status=completed` when:
   - no work was recorded between `in_progress` and `completed`,
   - a verify spec isn't met after the last edit (matched on both the command and the error flag, so `echo PASS` doesn't count),
   - completions arrive in a burst with no work between them,
   - `metadata.handoff` is missing.
 
-  Every deny ends with the waive instruction. This is the only gate with a `.catch`, because it may fail closed. A `classic.TaskCompleted` block is the backstop (spike: `deny-complete`, `taskcompleted-block`). **Red:** one test per deny reason, plus `echo PASS`, plus a completion that passes. *Depends on P1.7. With P1.9, covers DoD 2.*
-- [ ] P1.9 **G2: delete gate** (F4). `TaskUpdate status=deleted` on a step's task is denied and redirected to `taskmaster_waive`. **Red:** deleting a task that isn't a step's is allowed. *Depends on P1.6.*
+  Every deny ends with the waive instruction. This is the only gate with a `.catch`, because it may fail closed. A `classic.TaskCompleted` block is the backstop (spike: `deny-complete`, `taskcompleted-block`). **Red:** one test per deny reason, plus `echo PASS`, plus a completion that passes. *Depends on P1.7 and P1.7b. With P1.9, covers DoD 2.*
+- [ ] P1.9 **G2: delete gate** (F4). `TaskUpdate status=deleted` on a step's task is denied and redirected to `taskmaster_waive`. **Red:** deleting a task that isn't a step's is allowed. *Depends on P1.6 and P1.7b.*
 - [ ] P1.10 **G3: Stop gate, with F5 safety and the freshness gate** (F4, F5, F8.4). Block the stop while this loop's steps are uncovered, pending or in progress. The reason lists the step ids and the three ways out: do the step, waive it, or call `await_user`.
   - **Limits:** at most `maxStopBlocks` blocks per contract per user turn, and a new block only after the ledger has moved. After that, release the stop with `released: S3, S5 unverified` below the answer.
   - **Never block** with background tasks or crons running, on a `stop_hook_active` re-entry, or after `isAborted`.
@@ -234,13 +306,13 @@ Report the commands with their output. `main` is protected, so each task (or a s
   - **Fails open** (spike: `stop-block`).
   - **Freshness gate:** under the same cap, also block when there has been no checkpoint call since the last write call.
 
-  **Red:** a test per rule, including "no trapped session: the stop after the cap always passes" (Gate B safety: 0 trapped sessions), and one that a trailing "?" lets the stop through and records it. *Depends on P1.7. DoD 3.*
+  **Red:** a test per rule, including "no trapped session: the stop after the cap always passes" (Gate B safety: 0 trapped sessions), and one that a trailing "?" lets the stop through and records it. *Depends on P1.7 and P1.7b. DoD 3.*
 - [ ] P1.11 **Strictness and the off switches** (§6, F9). `observe`, `advisory`, `enforce` and `strict` change what G1–G3 do: log, warn, deny/block, or strict mode's extras (a waiver needs the user's yes; the cap is 3 blocks). Esc (`isAborted`) freezes every gate for that turn, `/taskmaster off` always wins, and reference skills cause no blocks. **Red:** a table-driven test over §6's rows for G1–G3. *Depends on P1.8–P1.10. DoD 4.*
 
 ## M4. Checkpoints and resume (F8.1–F8.6)
 - [ ] P1.12 **Store and contents** (F8.1, F8.2).
   - **Files:** `.taskmaster/active.json`; `runs/<id>/checkpoint.json` (schema-versioned); `HANDOFF.md`; journal chunks in `journal-<n>.jsonl`.
-  - **Mirror:** a mirror and index in `$.store`.
+  - **Mirror:** a mirror and index of the checkpoints in `$.store`.
   - **Redaction:** secrets are redacted before every write.
   - **Finding a run:** a run is found through `active.json`, never by session id. `/clear` changes the id, and a restart keeps it (plan §9).
   - **Skill hashes:** a checkpoint identifies a skill by P1.4's body key, never by the capture's `hash`. That one covers a typed command's arguments, and checkpoints can be committed.
@@ -248,7 +320,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
   **Red:** a checkpoint round-trips, a planted secret never reaches disk, and a shell `cd` doesn't move the writes. *Depends on P1.6.*
 - [ ] P1.13 **When to write, and git** (F8.3, F8.1).
   - **When to write:** after every task transition, every `checkpointEveryWrites` write calls, at PreCompact, at every Stop, at `session.end` (the run is marked `paused` unless it's done), and at `contextCheckpointPercent`.
-  - **Milestone commits:** `git add -- .taskmaster/`, then `git commit --only -- .taskmaster/` (spike: `git-commit-only`), at most one commit per milestone. `checkpointPush: milestone` pushes them.
+  - **Milestone commits:** `git add -- .taskmaster/`, then `git commit --only -- .taskmaster/` (spike: `git-commit-only`), at most one commit per milestone. **Leave `overrides/` out of both** (F17), so the mod's own checkpoint never commits an unapproved override edit. `checkpointPush: milestone` pushes them.
   - **First-commit notice:** shown for a public or unknown remote, using `gh repo view` to find out which. The answer is stored per repository, and a headless run logs that the notice wasn't shown.
 
   **Red:**

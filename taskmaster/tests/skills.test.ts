@@ -478,6 +478,42 @@ test('a /clear starts the captures over: only the skill loaded after it is held'
   expect(all.map(capture => capture.skill)).toEqual(['after'])
 })
 
+test("a session.end while a skill's override file is read keeps that skill out of the list it starts", async ($, on) => {
+  const world = engine(on, { holdFirstRead: true })
+  await start($)
+  const loading = expand($, 'before')
+  await until(world, () => world.readHeld)
+  await $.session.end(CLEAR)
+  world.releaseRead()
+  await loading
+  await expand($, 'after')
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill)).toEqual(['after'])
+})
+
+test('two skills loading at once land in the order they loaded, while the first one\'s override file is still being read', async ($, on) => {
+  const world = engine(on, { holdFirstRead: true })
+  await start($)
+  const first = expand($, 'first')
+  await until(world, () => world.readHeld)
+  await expand($, 'second')
+  world.releaseRead()
+  await first
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill)).toEqual(['first', 'second'])
+})
+
+test('a held override read holds up no skill: the file is read after the hook answers', { timeoutMs: 3_000 }, async ($, on) => {
+  const world = engine(on, { holdFirstRead: true })
+  await start($)
+
+  const skill = await expand($)
+  expect(skill.text).toBe('engine skill text')
+  expect(world.readHeld).toBe(true)
+})
+
 test('every session.end starts the captures over, whatever its reason', async ($, on) => {
   const world = engine(on)
   await start($)
@@ -746,4 +782,26 @@ test('a forked skill stays unattributed: it runs in a loop of its own that nothi
   const capture = await only($, world)
   expect(capture.loop).toEqual({ kind: 'unknown' })
   expect(capture.via).toBe('unattributed')
+})
+
+// Issue #12: the engine hands frontmatter past its bounds as `{}`, so a forked skill's `context: fork` can be lost, and
+// an open Skill call would then claim it for the caller's loop. Any problem the engine flags leaves the skill unattributed.
+test('a skill whose frontmatter the engine flagged stays unattributed, whole or in part, as it may have been forked', async ($, on) => {
+  const cases: { frontmatter: Record<string, string>; frontmatterProblem: string }[] = [
+    { frontmatter: {}, frontmatterProblem: 'the frontmatter was past its bounds' },
+    { frontmatter: { description: 'Write a note.' }, frontmatterProblem: 'a key was left out' },
+  ]
+  let current = cases[0] as (typeof cases)[number]
+  const flagged = () => $.skill.prompt({ skill: 'flagged', text: NOTES_TEXT, ...current, source: 'projectSettings' })
+  const world = engine(on, { during: { toolCall: e => (e.tool === 'Skill' ? flagged() : Promise.resolve()) } })
+  await start($)
+  for (const each of cases) {
+    current = each
+    await $.tool.call({ tool: 'Skill', skill: 'flagged' })
+
+    const capture = await only($, world)
+    expect(capture.loop).toEqual({ kind: 'unknown' })
+    expect(capture.via).toBe('unattributed')
+    await $.session.end(CLEAR)
+  }
 })

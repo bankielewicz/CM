@@ -40,7 +40,7 @@ export function keepLatest(list: readonly SkillCapture[], capture: SkillCapture)
 }
 
 /** The tag on what `$.state` keeps. A reload whose code names another tag reads the value as absent. */
-export const SKILLS_SHAPE = 'skills-2'
+export const SKILLS_SHAPE = 'skills-3'
 
 /**
  * Runs saves one at a time, in the order added, so captures land newest last and

@@ -22,13 +22,19 @@ export type World = {
   onWrite: (() => void)[]
   /** The latest value the mod wrote under each `$.state` key, as `plugin/key`. */
   state: Map<string, unknown>
+  /** Every path the mod asked `$.fs.read` for, in order. */
+  reads: string[]
   /** Every `$.ui.log` line, with where it was sent. */
   logs: { text: string; to: string }[]
   /** True once `holdFirstStateWrite` is holding a write. */
   stateHeld: boolean
   /** Lets the first `$.state` write finish, when `holdFirstStateWrite` held it. */
   releaseState: () => void
-  /** Called after each `$.state` write and each `$.ui.log` line. */
+  /** True once `holdFirstRead` is holding a read. */
+  readHeld: boolean
+  /** Lets the first `$.fs.read` answer, when `holdFirstRead` held it. */
+  releaseRead: () => void
+  /** Called after each `$.state` write and each `$.ui.log` line, and when a read is held. */
   onChange: (() => void)[]
 }
 
@@ -79,6 +85,14 @@ export type EngineOptions = {
   failClock?: boolean
   /** What `$.state` holds at the start, by `plugin/key`, as a reload would leave it. */
   seedState?: Record<string, unknown>
+  /** Files `$.fs.read` can read, by absolute path. Any other read fails, as a missing file does. */
+  files?: Record<string, string>
+  /** The first `$.fs.read` waits until `world.releaseRead()`, as a slow disk would. */
+  holdFirstRead?: boolean
+  /** Paths that exist, as `$.fs.exists` says, but that `$.fs.read` refuses, as an unreadable file would. */
+  unreadableFiles?: string[]
+  /** `$.fs.exists` rejects, as it does for a network location. */
+  failExists?: boolean
 }
 
 // Nothing sits beneath the plugin in a test: these hooks stand for the
@@ -98,6 +112,11 @@ export function engine(on: On, options: EngineOptions = {}): World {
   const stateReleased = new Promise<void>(resolve => {
     releaseState = resolve
   })
+  let heldRead = options.holdFirstRead ?? false
+  let releaseRead: () => void = () => {}
+  const readReleased = new Promise<void>(resolve => {
+    releaseRead = resolve
+  })
   const world: World = {
     saved: new Map(Object.entries(options.seed ?? {})),
     writes: [],
@@ -106,9 +125,12 @@ export function engine(on: On, options: EngineOptions = {}): World {
     release: () => release(),
     onWrite: [],
     state: new Map(),
+    reads: [],
     logs: [],
     stateHeld: false,
     releaseState: () => releaseState(),
+    readHeld: false,
+    releaseRead: () => releaseRead(),
     onChange: [],
   }
   const reach = (event: WatchedEvent): void => {
@@ -168,6 +190,24 @@ export function engine(on: On, options: EngineOptions = {}): World {
     if (to !== 'debug') world.shown.push(`log: ${e.text}`)
     changed()
     return { value: undefined }
+  })
+  on('session.root', () => ({ value: '/repo' }))
+  on('fs.read', async (_, e) => {
+    world.reads.push(e.path)
+    if (heldRead) {
+      heldRead = false
+      world.readHeld = true
+      changed()
+      await readReleased
+    }
+    if (options.unreadableFiles?.includes(e.path)) throw new Error(`EACCES: permission denied, ${e.path}`)
+    const text = options.files?.[e.path]
+    if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
+    return { value: text }
+  })
+  on('fs.exists', (_, e) => {
+    if (options.failExists) throw new Error(`exists failed: ${e.path}`)
+    return { value: options.files?.[e.path] !== undefined || (options.unreadableFiles?.includes(e.path) ?? false) }
   })
   on('ui.toast', () => {
     world.shown.push('toast')
