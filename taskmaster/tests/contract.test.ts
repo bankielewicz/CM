@@ -70,6 +70,7 @@ const INVALID: [string, unknown, RegExp][] = [
   ['an unknown key', { steps: [], strict: true }, /unknown key "strict"/],
   ['a newer version', { version: 2, steps: [] }, /newer/],
   ['a bad mode', { mode: 'loud', steps: [] }, /mode/],
+  ['a blank mode, as YAML reads `mode:` with nothing after it', { mode: null, steps: [] }, /mode/],
   ['steps that aren\'t a list', { steps: 'one' }, /steps/],
   ['a step that isn\'t an object', { steps: ['one'] }, /step 1/],
   ['a step with an unknown key', { steps: [{ id: 'a', title: 'A', owner: 'me' }] }, /unknown key "owner"/],

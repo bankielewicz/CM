@@ -33,7 +33,8 @@ export function validateDeclared(value: unknown): { contract?: DeclaredContract;
   if (value.version !== undefined && value.version !== 1) {
     problems.push(`version ${String(value.version)} is written for a newer taskmaster; this one reads version 1`)
   }
-  const mode = value.mode ?? 'enforce'
+  // Left out, it's enforce. Blank, as YAML reads `mode:` with nothing after it, it's invalid like any other blank key.
+  const mode = value.mode === undefined ? 'enforce' : value.mode
   if (!MODES.includes(mode as (typeof MODES)[number])) problems.push(`mode must be one of ${MODES.join(', ')}`)
   const origin = value.origin
   if (origin !== undefined && !ORIGINS.includes(origin as (typeof ORIGINS)[number])) problems.push(`origin must be authored or suggested`)
