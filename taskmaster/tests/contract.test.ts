@@ -77,6 +77,16 @@ test('only a higher version number is called newer; a version written as text, o
   expect(validateDeclared({ version: 2, steps: [] }).problems[0]).toMatch(/version 2 is written for a newer taskmaster/)
 })
 
+test('confirm_before names each step once, and a step set aside for its own problem is not reported again as missing', () => {
+  const twice = validateDeclared({ steps: [{ id: 'a', title: 'A' }], confirm_before: ['a', 'a'] })
+  expect(twice.contract).toBeUndefined()
+  expect(twice.problems).toEqual(['confirm_before names "a" more than once'])
+  expect(validateDeclared({ steps: [{ id: 'a', title: ' ' }], confirm_before: ['a'] }).problems).toEqual(['step 1 needs a title'])
+  for (const notAStep of ['a', null]) {
+    expect(validateDeclared({ steps: [notAStep, { id: 'b', title: 'B' }], confirm_before: ['a'] }).problems).toEqual(['step 1 must be an object', 'confirm_before names "a", which is no step'])
+  }
+})
+
 // Each of these is invalid, and an invalid contract is never half-used.
 const INVALID: [string, unknown, RegExp][] = [
   ['not an object', ['steps'], /object/],

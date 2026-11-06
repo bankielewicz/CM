@@ -54,9 +54,14 @@ export function validateDeclared(value: unknown): { contract?: DeclaredContract;
   const confirmBefore: string[] = []
   if (value.confirm_before !== undefined) {
     if (!Array.isArray(value.confirm_before)) problems.push('confirm_before must be a list of step ids')
-    else for (const id of value.confirm_before) {
-      if (typeof id === 'string' && steps.some(step => step.id === id)) confirmBefore.push(id)
-      else problems.push(`confirm_before names "${String(id)}", which is no step`)
+    else {
+      // Checked against every id the steps declare, so a step set aside for its own problem isn't reported again as missing.
+      const declared = Array.isArray(value.steps) ? value.steps.flatMap(raw => (isRecord(raw) && typeof raw.id === 'string' ? [raw.id] : [])) : []
+      for (const id of value.confirm_before) {
+        if (typeof id !== 'string' || !declared.includes(id)) problems.push(`confirm_before names "${String(id)}", which is no step`)
+        else if (confirmBefore.includes(id)) problems.push(`confirm_before names "${id}" more than once`)
+        else confirmBefore.push(id)
+      }
     }
   }
 
