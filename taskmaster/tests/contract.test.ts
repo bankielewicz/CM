@@ -64,6 +64,10 @@ test('edits and tool verify specs are kept as written', () => {
   expect(contract?.steps.map(step => step.verify)).toEqual([{ edits: 'src/**' }, { tool: 'Write' }, { bash: 'npm test', exit: 1 }])
 })
 
+test('an exit is any status a process can return, 0 to 255', () => {
+  for (const exit of [0, 255]) expect(validateDeclared({ steps: [{ id: 'a', title: 'A', verify: { bash: 'x', exit } }] }).contract?.steps[0]?.verify).toEqual({ bash: 'x', exit })
+})
+
 // Each of these is invalid, and an invalid contract is never half-used.
 const INVALID: [string, unknown, RegExp][] = [
   ['not an object', ['steps'], /object/],
@@ -84,6 +88,9 @@ const INVALID: [string, unknown, RegExp][] = [
   ['verify with no kind', { steps: [{ id: 'a', title: 'A', verify: {} }] }, /verify/],
   ['verify with an unknown key', { steps: [{ id: 'a', title: 'A', verify: { edits: 'x', exit: 0 } }] }, /verify/],
   ['a non-integer exit', { steps: [{ id: 'a', title: 'A', verify: { bash: 'x', exit: 'zero' } }] }, /exit/],
+  ['a negative exit', { steps: [{ id: 'a', title: 'A', verify: { bash: 'x', exit: -5 } }] }, /exit/],
+  ['an exit past 255', { steps: [{ id: 'a', title: 'A', verify: { bash: 'x', exit: 256 } }] }, /exit/],
+  ['an exit too large for a process', { steps: [{ id: 'a', title: 'A', verify: { bash: 'x', exit: 1e21 } }] }, /exit/],
   ['an empty command', { steps: [{ id: 'a', title: 'A', verify: { bash: ' ' } }] }, /verify/],
   ['confirm_before naming no step', { steps: [{ id: 'a', title: 'A' }], confirm_before: ['b'] }, /confirm_before/],
   ['confirm_before that isn\'t a list', { steps: [], confirm_before: 'a' }, /confirm_before/],

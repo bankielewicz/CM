@@ -104,8 +104,9 @@ function readVerify(raw: unknown, n: number, problems: string[]): VerifySpec | u
     return undefined
   }
   if (kind !== 'bash') return kind === 'edits' ? { edits: value } : { tool: value }
-  if (raw.exit !== undefined && !Number.isInteger(raw.exit)) {
-    problems.push(`step ${n}'s verify exit must be a whole number`)
+  // An exit status is what a process can return: 0 to 255.
+  if (raw.exit !== undefined && !(Number.isInteger(raw.exit) && (raw.exit as number) >= 0 && (raw.exit as number) <= 255)) {
+    problems.push(`step ${n}'s verify exit must be a whole number from 0 to 255`)
     return undefined
   }
   return { bash: value, exit: (raw.exit as number | undefined) ?? 0 }
