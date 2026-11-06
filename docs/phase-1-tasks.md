@@ -272,7 +272,7 @@ Report the commands with their output. `main` is protected, so each task (or a s
     - A project file that loosens the contract it replaces needs the person's yes. The yes is kept in `$.store`, keyed by repository, skill and the file's hash, so a changed file asks again, and so does a fresh cloud container. P1.7c adds `overrideTrust: default-branch`.
   - **Visibility:** the source of each override is recorded for P1.17's summary, and a loosened contract is flagged. A tool call that touches a protected path is recorded for P1.21's *model gaming* tripwire.
   - **Claude-facing text** never mentions overrides or the personal layer. A refused write says to ask the person, or to use `taskmaster_waive`.
-  - **Open question for the owner, before this task starts:** may an override beat a third-party skill's own frontmatter? (Decision 7 settled which layer wins.)
+  - **Decided (owner, 2026-11-06):** an override beats a skill's own frontmatter, whatever its source, except a `policySettings` skill, which keeps its valid frontmatter first. P1.4 builds the order. Decision 7 settled which layer wins. So a loosening check here compares an override with the frontmatter it now replaces, as well as with another layer.
   - **Checked live:** a command typed in the Claude app carries `origin: { kind: 'composer' }` (the `/tm-origin` probe, 2026-11-04). **Still to check live:** a plugin's `ask` in bypass mode.
 - [ ] P1.7c **Trust the default branch, behind the override guard** (F17.1, F12; owner decision 8).
   - **The template:** ship F17.1's workflow as `taskmaster/templates/override-guard.yml`, with its setup steps in the README.
