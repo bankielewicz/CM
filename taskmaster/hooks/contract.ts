@@ -126,8 +126,9 @@ export function fromFrontmatter(frontmatter: Readonly<Record<string, unknown>>, 
   return contract ? { contract, problems: [] } : { problems: problemsAt('frontmatter', problems) }
 }
 
-/** The override tier: the override file's text, undefined when there is no file. */
-export function fromOverride(fileText: string | undefined): Tier {
+/** The override tier: the override file's text, undefined when there is no file, and why a file that's there couldn't be read. */
+export function fromOverride(fileText: string | undefined, readError?: string): Tier {
+  if (readError !== undefined) return { problems: [{ where: 'override', message: `the override file couldn't be read: ${readError}` }] }
   if (fileText === undefined) return { problems: [] }
   let value: unknown
   try {

@@ -234,6 +234,25 @@ test('a missing override file means no declared contract, and logs nothing', asy
   expect(world.logs).toEqual([])
 })
 
+test("an override file that is there but can't be read is set aside with its reason, in the debug log", async ($, on) => {
+  const world = await session($, on, { unreadableFiles: [OVERRIDE_PATH] })
+  await load($, {})
+
+  const declared = (await captured(world))?.declared
+  expect(declared?.source).toBe('none')
+  expect(declared?.problems.map(problem => problem.where)).toEqual(['override'])
+  expect(declared?.problems[0]?.message).toMatch(/^the override file couldn't be read: ./)
+  expect(world.logs).toHaveLength(1)
+  expect(world.logs[0]?.to).toBe('debug')
+})
+
+test("a failed read whose file can't be checked is set aside too, rather than taken for a missing file", async ($, on) => {
+  const world = await session($, on, { unreadableFiles: [OVERRIDE_PATH], failExists: true })
+  await load($, {})
+
+  expect((await captured(world))?.declared.problems[0]?.message).toMatch(/^the override file couldn't be read: ./)
+})
+
 test('a contract set aside is logged to the debug log, never the transcript', async ($, on) => {
   const world = await session($, on, { files: { [OVERRIDE_PATH]: '{ not json' } })
   await load($, { taskmaster: { mode: 'loud', steps: [] } })

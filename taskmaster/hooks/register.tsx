@@ -139,13 +139,19 @@ export const register: Register = (on, options) => {
     let override: Tier | undefined
     if (!frontmatter.contract) {
       let file: string | undefined
+      let path: string | undefined
+      let unreadable: string | undefined
       try {
         const root = (await $.session.root()).replace(/\/+$/, '')
-        file = await $.fs.read(`${root}/${config.overrideDir}/${overrideFile(e.skill)}`)
-      } catch {
-        // No override file.
+        path = `${root}/${config.overrideDir}/${overrideFile(e.skill)}`
+        file = await $.fs.read(path)
+      } catch (error) {
+        // A missing file declares nothing. One that's there but can't be read, or a path that can't be worked out, is set
+        // aside with its reason, so a stricter contract isn't lost without a word.
+        const missing = path !== undefined && !(await $.fs.exists(path).catch(() => true))
+        if (!missing) unreadable = reason(error)
       }
-      override = fromOverride(file)
+      override = fromOverride(file, unreadable)
     }
     const declared = resolveDeclared(frontmatter, override)
     for (const problem of declared.problems) {
