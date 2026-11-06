@@ -29,10 +29,6 @@ export const register: Register = (on, options) => {
   // also keeps it clear of `update`, which retries on a read the docs say is one
   // moment per dispatch. It's current once `saves` is idle, not when a hook answers.
   let captured: SkillCapture[] | undefined
-  // Advanced by each session.end. A skill whose load began before one, as when the
-  // session ends while its override file is read, belongs to the session that ended,
-  // so its save writes nothing into the list the reset starts.
-  let generation = 0
 
   // Notes an event for the self-check. It never waits on the store.
   const seen = (event: WatchedEvent): void => selfCheck.note(event)
@@ -64,7 +60,6 @@ export const register: Register = (on, options) => {
   // the old list, and if it fails the held list is still empty.
   on('session.end', ($, e, next) => {
     seen('session.end')
-    generation += 1
     saves.add(async () => {
       captured = []
       try {
@@ -128,41 +123,39 @@ export const register: Register = (on, options) => {
 
   on('skill.prompt', async ($, e, next) => {
     seen('skill.prompt')
-    const began = generation
     // Worked out first: the windows that say who loaded it are open now. A forked skill runs in a loop that nothing open
     // names. Frontmatter the engine flagged may have lost the `context: fork` that says so, so it stays unattributed too.
     const { loop, via } = e.frontmatter.context === 'fork' || e.frontmatterProblem !== undefined ? UNATTRIBUTED : skills.attribute(e.skill)
-    // P1.3: the declared contract. This hook waits for it, because it's what P1.4
-    // and P1.5 build their answer from. An override file is read only when the
-    // frontmatter gives none, and a missing file declares nothing.
-    const frontmatter = fromFrontmatter(e.frontmatter, e.frontmatterProblem)
-    let override: Tier | undefined
-    if (!frontmatter.contract) {
-      let file: string | undefined
-      let path: string | undefined
-      let unreadable: string | undefined
-      try {
-        const root = (await $.session.root()).replace(/\/+$/, '')
-        path = `${root}/${config.overrideDir}/${overrideFile(e.skill)}`
-        file = await $.fs.read(path)
-      } catch (error) {
-        // A missing file declares nothing. One that's there but can't be read, or a path that can't be worked out, is set
-        // aside with its reason, so a stricter contract isn't lost without a word.
-        const missing = path !== undefined && !(await $.fs.exists(path).catch(() => true))
-        if (!missing) unreadable = reason(error)
-      }
-      override = fromOverride(file, unreadable)
-    }
-    const declared = resolveDeclared(frontmatter, override)
-    for (const problem of declared.problems) {
-      $.ui.log(`taskmaster: ${e.skill}: ${problem.where} contract set aside: ${problem.message}`, { to: 'debug' })
-    }
-    // Saved after the hook answers: recording is nothing it needs to answer, and
-    // the engine holds the skill's load, and the agent's first model request, until
-    // this hook does.
+    // Everything else is saved after the hook answers: recording is nothing it needs to answer, and the engine holds the
+    // skill's load, and the agent's first model request, until this hook does. Queued now, so captures land in the order
+    // the skills loaded, and a session.end during the read below queues its reset behind this save.
     saves.add(async () => {
-      if (generation !== began) return
       try {
+        // P1.3: the declared contract. Read here, after the hook answers, because nothing answers from it yet. P1.5,
+        // whose footer is built from it, moves the read back into the hook (owner, 2026-11-06). An override file is
+        // read only when the frontmatter gives no contract.
+        const frontmatter = fromFrontmatter(e.frontmatter, e.frontmatterProblem)
+        let override: Tier | undefined
+        if (!frontmatter.contract) {
+          let file: string | undefined
+          let path: string | undefined
+          let unreadable: string | undefined
+          try {
+            const root = (await $.session.root()).replace(/\/+$/, '')
+            path = `${root}/${config.overrideDir}/${overrideFile(e.skill)}`
+            file = await $.fs.read(path)
+          } catch (error) {
+            // A missing file declares nothing. One that's there but can't be read, or a path that can't be worked out,
+            // is set aside with its reason, so a stricter contract isn't lost without a word.
+            const missing = path !== undefined && !(await $.fs.exists(path).catch(() => true))
+            if (!missing) unreadable = reason(error)
+          }
+          override = fromOverride(file, unreadable)
+        }
+        const declared = resolveDeclared(frontmatter, override)
+        for (const problem of declared.problems) {
+          $.ui.log(`taskmaster: ${e.skill}: ${problem.where} contract set aside: ${problem.message}`, { to: 'debug' })
+        }
         const capture: SkillCapture = {
           skill: e.skill,
           frontmatter: e.frontmatter,

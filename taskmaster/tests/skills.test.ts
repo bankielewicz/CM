@@ -492,6 +492,28 @@ test("a session.end while a skill's override file is read keeps that skill out o
   expect(all.map(capture => capture.skill)).toEqual(['after'])
 })
 
+test('two skills loading at once land in the order they loaded, while the first one\'s override file is still being read', async ($, on) => {
+  const world = engine(on, { holdFirstRead: true })
+  await start($)
+  const first = expand($, 'first')
+  await until(world, () => world.readHeld)
+  await expand($, 'second')
+  world.releaseRead()
+  await first
+
+  const all = await settled($, world)
+  expect(all.map(capture => capture.skill)).toEqual(['first', 'second'])
+})
+
+test('a held override read holds up no skill: the file is read after the hook answers', { timeoutMs: 3_000 }, async ($, on) => {
+  const world = engine(on, { holdFirstRead: true })
+  await start($)
+
+  const skill = await expand($)
+  expect(skill.text).toBe('engine skill text')
+  expect(world.readHeld).toBe(true)
+})
+
 test('every session.end starts the captures over, whatever its reason', async ($, on) => {
   const world = engine(on)
   await start($)
