@@ -129,8 +129,9 @@ export const register: Register = (on, options) => {
   on('skill.prompt', async ($, e, next) => {
     seen('skill.prompt')
     const began = generation
-    // Worked out first: the windows that say who loaded it are open now.
-    const { loop, via } = e.frontmatter.context === 'fork' ? UNATTRIBUTED : skills.attribute(e.skill)
+    // Worked out first: the windows that say who loaded it are open now. A forked skill runs in a loop that nothing open
+    // names. Frontmatter the engine flagged may have lost the `context: fork` that says so, so it stays unattributed too.
+    const { loop, via } = e.frontmatter.context === 'fork' || e.frontmatterProblem !== undefined ? UNATTRIBUTED : skills.attribute(e.skill)
     // P1.3: the declared contract. This hook waits for it, because it's what P1.4
     // and P1.5 build their answer from. An override file is read only when the
     // frontmatter gives none, and a missing file declares nothing.

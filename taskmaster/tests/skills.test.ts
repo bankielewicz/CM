@@ -761,3 +761,25 @@ test('a forked skill stays unattributed: it runs in a loop of its own that nothi
   expect(capture.loop).toEqual({ kind: 'unknown' })
   expect(capture.via).toBe('unattributed')
 })
+
+// Issue #12: the engine hands frontmatter past its bounds as `{}`, so a forked skill's `context: fork` can be lost, and
+// an open Skill call would then claim it for the caller's loop. Any problem the engine flags leaves the skill unattributed.
+test('a skill whose frontmatter the engine flagged stays unattributed, whole or in part, as it may have been forked', async ($, on) => {
+  const cases: { frontmatter: Record<string, string>; frontmatterProblem: string }[] = [
+    { frontmatter: {}, frontmatterProblem: 'the frontmatter was past its bounds' },
+    { frontmatter: { description: 'Write a note.' }, frontmatterProblem: 'a key was left out' },
+  ]
+  let current = cases[0] as (typeof cases)[number]
+  const flagged = () => $.skill.prompt({ skill: 'flagged', text: NOTES_TEXT, ...current, source: 'projectSettings' })
+  const world = engine(on, { during: { toolCall: e => (e.tool === 'Skill' ? flagged() : Promise.resolve()) } })
+  await start($)
+  for (const each of cases) {
+    current = each
+    await $.tool.call({ tool: 'Skill', skill: 'flagged' })
+
+    const capture = await only($, world)
+    expect(capture.loop).toEqual({ kind: 'unknown' })
+    expect(capture.via).toBe('unattributed')
+    await $.session.end(CLEAR)
+  }
+})
