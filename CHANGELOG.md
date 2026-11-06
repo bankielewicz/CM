@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added skill capture (P1.1). Each skill is recorded as it loads, with a hash of its text and the loop it belongs to: the main loop, or the subagent that loaded it with the Skill tool or had it preloaded. Its text isn't kept, because it can hold the words of a typed command. A skill that two loops could claim, or a forked skill, is left unattributed.
 - Added a runbook for the event-order probe (`docs/probes/event-order.md`), to rerun after a Claude Code update.
 - Added the deterministic skill parse (P1.2). It reads steps (from "Step N" or numbered headings, a numbered list, or a checklist), MUST, NEVER and ALWAYS rules, and test, lint and build commands from a skill's text, with no model.
-- Added declared contracts (P1.3). A skill's `taskmaster:` frontmatter block, or its override file `.taskmaster/overrides/<skill>.json`, is checked strictly. An invalid one is set aside whole, with its reason in the debug log.
+- Added declared contracts (P1.3). A skill's `taskmaster:` frontmatter block, or its override file `.taskmaster/overrides/<skill>.json`, is checked strictly. A plugin's skill reads its plugin's folder, `.taskmaster/overrides/acme/notes.json` for `acme:notes`. An invalid contract, or an override file that's there but can't be read, is set aside whole, with its reason in the debug log.
 
 ### Changed
 

@@ -133,7 +133,8 @@ every gate decision, intervention, rating ─► Metrics (.taskmaster/metrics/*.
     - **The file is opt-in.** A person writes it to share a contract: F16's apply with the project layer, or `/taskmaster contract export <skill>` (Phase 2, with `contract edit`, which starts from the file's contract when there is one).
     - **Open question for the owner:** whether an override may beat a third-party skill's own frontmatter.
     - Both layers are protected as F17 says. A project file that loosens what it replaces needs the person's yes, once per file version and store, unless `overrideTrust: default-branch` trusts it (F17.1).
-  - **The file is named after the skill as `skill.prompt` names it,** with anything but letters, digits, `.`, `-` and `_` changed to `_`. A plugin's skill arrives plugin-qualified, so `acme:notes` reads `acme_notes.json`; a hand-made `notes.json` won't match it.
+  - **The file is named after the skill as `skill.prompt` names it, with a plugin's name as its folder** (owner, 2026-11-06): `notes` reads `notes.json`, and a plugin's `acme:notes` reads `acme/notes.json`, so a hand-made `notes.json` won't match it. Each part of the name must be letters, digits, `.`, `-` or `_`, starting with a letter or digit, so no two skills share a file and none leaves the folder. A skill with any other name reads no override file, and the debug log says why. On a case-insensitive disk, `Notes` and `notes` still share one.
+  - **Unchecked live:** whether one skill can load as `notes` one time and `acme:notes` another, say typed or through the Skill tool. If it can, it reads a different file each way. A probe should settle it before F16 writes these files.
 
 ### F2. Ledger: the mod's own record (source of truth)
 - **F2.1** For each `tool.call` on any loop: `agentId`, tool, a trimmed input digest, `isError`, a sequence number, files touched, and the Bash command line.
@@ -532,7 +533,7 @@ The mod's own code is covered by visibility only.
    - Checkpoint commits leave `overrides/` out (F8.1), so the mod's own commit never turns an unapproved edit into history that looks reviewed.
 
 **F17.1 Trusting the default branch: the override guard** (owner decision, 2026-11-04). In a fresh cloud container the store is empty, so each project file that loosens a contract would ask again. A repository can instead hold override changes when they're reviewed:
-- **The CI check.** Taskmaster ships a workflow template that holds any pull request changing a file under `overrideDir`, or the workflow itself, until the owner approves it. It flags every change, tightening included. A loosening-only check, which would run the base branch's `contract.ts` on the files as data, is a later refinement.
+- **The CI check.** Taskmaster ships a workflow template that holds any pull request changing a file under `overrideDir`, at any depth, the folder itself or a folder above it, or the workflow itself, until the owner approves it. Swapping the folder, or one above it, for a link would bring in other files without changing one under it. It flags every change, tightening included. A loosening-only check, which would run the base branch's `contract.ts` on the files as data, is a later refinement.
 - **Why an environment, not a PR review.** Claude opens pull requests under the owner's account, and GitHub doesn't let an author approve their own pull request, so neither a PR review nor a CODEOWNERS rule can hold them. The approval is a GitHub environment, `taskmaster-overrides`, with the owner as its required reviewer and *Prevent self-review* off. The owner approves in the run's *Review deployments* dialog, or with `gh api`. Environments with reviewers are available for public repositories on every plan, and for private ones on paid plans.
 - **The mod's side,** with `overrideTrust: default-branch` (F12, opt-in). A project file whose content matches the default branch's version applies without asking: with the check required and no bypass, every change on that branch was approved. The mod fetches the default branch itself, so a moved local ref can't fake a match, and the guard (4) also watches `git remote set-url`, `git update-ref` and writes under `.git/`. The default, `ask`, is right for a repository without the check, because the mod can't tell whether one runs.
 - **The residual.** The approval rests on the owner's GitHub account, and Claude works through credentials that act as that account. The GitHub tools in this cloud session have no method to approve a deployment (checked 2026-11-04), but a shell call to the API might succeed if the session's token allows it. So this approval is a guard rail like the rest of F17, not the outside authority below. To narrow it:
@@ -602,16 +603,20 @@ jobs:
             --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/changed.txt"
           touched=false
           while IFS= read -r path; do
+            # The folder itself, a file under it at any depth (a plugin's acme/notes.json), a folder above
+            # it, and this guard. Swapping the folder, or one above it, for a link would bring in other files.
             case "$path" in
-              "$OVERRIDE_DIR"/* | "$GUARD_FILE")
-                if [ "$touched" = false ]; then
-                  printf '### Override files or the override guard this pull request changes\n\n' >> "$GITHUB_STEP_SUMMARY"
-                fi
-                touched=true
-                # A file name comes from the pull request, so keep it inside a code span.
-                printf -- '- `%s`\n' "${path//\`/}" >> "$GITHUB_STEP_SUMMARY"
-                ;;
+              "$OVERRIDE_DIR" | "$OVERRIDE_DIR"/* | "$GUARD_FILE") hit=true ;;
+              *) case "$OVERRIDE_DIR" in "$path"/*) hit=true ;; *) hit=false ;; esac ;;
             esac
+            if [ "$hit" = true ]; then
+              if [ "$touched" = false ]; then
+                printf '### Override files or the override guard this pull request changes\n\n' >> "$GITHUB_STEP_SUMMARY"
+              fi
+              touched=true
+              # A file name comes from the pull request, so keep it inside a code span.
+              printf -- '- `%s`\n' "${path//\`/}" >> "$GITHUB_STEP_SUMMARY"
+            fi
           done < "$RUNNER_TEMP/changed.txt"
           echo "touched=$touched" >> "$GITHUB_OUTPUT"
 
