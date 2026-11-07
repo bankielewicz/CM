@@ -721,6 +721,12 @@ Under `enforce`, only contracts that are themselves `enforce` (F1.4) are gated. 
   - Pull requests Claude opens in this repository are authored by the owner's account, so the owner can't approve them in a PR review (F17.1).
   - The GitHub tools in this cloud session can run, re-run and cancel workflow runs, but have no method to approve a deployment.
   - Seen on 2.1.318 (PR #8's `/clear` probe): a session drove a nested interactive `claude` through tmux and accepted its trust prompt for a scratch folder. So the nested-session route F17 describes works in practice, and P1.7b's guard on Bash that starts `claude` is needed.
+- **Learned in P1.3** (seen live on 2.1.319, 2026-11-06, with a probe mod in a scratch project, for #21):
+  - `$.fs.exists` is false for a file under a folder that can't be searched, mode `644` or `000`, though the file is there. So after a failed read, `exists` can't tell a missing file from a hidden one.
+  - `$.fs.list` of a folder that can be read but not searched (`644`) still lists its names. Of one that can't be read (`000`) it rejects with `EACCES`. So the nearest folder that exists either lists the next name on the path, or rejects, and the mod's override read relies on that. `claude plugin validate` lists the call, and it asked for no permission.
+  - The real engine's errors carry their code: `taskmaster: $.fs.read(<path>) failed: EACCES`. In the test kit, an error the engine's hook throws reaches the mod as "no implementation for fs.read", so the mod matches no error text.
+  - `$.fs.read` of a folder rejects with `EISDIR`, and `$.fs.list` of a file with `ENOTDIR`.
+  - `claude -p --debug-file <file>` appends to the file. A loop of runs that reuses one file must clear it first.
 - **Learned in P1.2.**
   - `skill.prompt`'s text is `"Base directory for this skill: <dir>\n\n"` + the body, with no YAML block. A typed command's arguments are appended as `"\n\n\nARGUMENTS: <args>"`. Checked live: the capture's hash matched that form, and `/notes some words here` showed the block.
   - So a hash of the whole text changes with the skill's folder and with every argument. Contract caches and resume checks key on the body alone.
