@@ -1,6 +1,6 @@
 import { mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { FsEntry, On } from 'claude-code'
 
 import type { SelfCheckRecord, WatchedEvent } from '../types'
 
@@ -93,6 +93,10 @@ export type EngineOptions = {
   unreadableFiles?: string[]
   /** `$.fs.exists` rejects, as it does for a network location. */
   failExists?: boolean
+  /** Folders that exist but can't be searched: `$.fs.list` refuses them, and nothing under them exists or reads. */
+  inaccessibleDirs?: string[]
+  /** Paths their folder lists, as a symbolic link, that `$.fs.exists` calls false and `$.fs.read` refuses, as a broken link would be. */
+  danglingLinks?: string[]
 }
 
 // Nothing sits beneath the plugin in a test: these hooks stand for the
@@ -191,7 +195,21 @@ export function engine(on: On, options: EngineOptions = {}): World {
     changed()
     return { value: undefined }
   })
-  on('session.root', () => ({ value: '/repo' }))
+  // The files and folders this engine knows of: a folder exists when something it knows lies under it, or it is the
+  // root or an inaccessible folder.
+  const ROOT = '/repo'
+  const known = (): string[] => [
+    ...Object.keys(options.files ?? {}),
+    ...(options.unreadableFiles ?? []),
+    ...(options.danglingLinks ?? []),
+    ...(options.inaccessibleDirs ?? []),
+  ]
+  const inaccessible = (path: string): boolean => options.inaccessibleDirs?.includes(path) ?? false
+  const hidden = (path: string): boolean => (options.inaccessibleDirs ?? []).some(dir => path.startsWith(`${dir}/`))
+  const dangling = (path: string): boolean => options.danglingLinks?.includes(path) ?? false
+  const isFile = (path: string): boolean => options.files?.[path] !== undefined || (options.unreadableFiles?.includes(path) ?? false)
+  const holds = (path: string): boolean => known().some(entry => entry.startsWith(`${path}/`))
+  on('session.root', () => ({ value: ROOT }))
   on('fs.read', async (_, e) => {
     world.reads.push(e.path)
     if (heldRead) {
@@ -200,14 +218,32 @@ export function engine(on: On, options: EngineOptions = {}): World {
       changed()
       await readReleased
     }
-    if (options.unreadableFiles?.includes(e.path)) throw new Error(`EACCES: permission denied, ${e.path}`)
+    if (options.unreadableFiles?.includes(e.path) || hidden(e.path) || dangling(e.path)) {
+      throw new Error(`EACCES: permission denied, ${e.path}`)
+    }
     const text = options.files?.[e.path]
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
   })
   on('fs.exists', (_, e) => {
     if (options.failExists) throw new Error(`exists failed: ${e.path}`)
-    return { value: options.files?.[e.path] !== undefined || (options.unreadableFiles?.includes(e.path) ?? false) }
+    // Nothing under a folder that can't be searched can be stat'd, and a broken link leads nowhere.
+    if (hidden(e.path) || dangling(e.path)) return { value: false }
+    return { value: isFile(e.path) || e.path === ROOT || inaccessible(e.path) || holds(e.path) }
+  })
+  on('fs.list', (_, e) => {
+    if (inaccessible(e.path) || hidden(e.path)) throw new Error(`EACCES: permission denied, scandir '${e.path}'`)
+    if (e.path !== ROOT && !holds(e.path)) throw new Error(`ENOENT: no such file or directory, scandir '${e.path}'`)
+    const entries = new Map<string, FsEntry>()
+    for (const entry of known()) {
+      if (!entry.startsWith(`${e.path}/`)) continue
+      const name = entry.slice(e.path.length + 1).replace(/\/.*$/s, '')
+      const path = `${e.path}/${name}`
+      if (entries.has(name)) continue
+      const kind = isFile(path) ? 'file' : dangling(path) ? 'other' : 'dir'
+      entries.set(name, { name, kind, size: 0, mtimeMs: 0, isLink: kind === 'other' })
+    }
+    return { value: [...entries.values()] }
   })
   on('ui.toast', () => {
     world.shown.push('toast')
