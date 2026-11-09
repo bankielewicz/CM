@@ -10,7 +10,7 @@ import type { Register } from 'claude-code'
 import type { Io, SkillCapture, WatchedEvent } from '../types'
 import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
-import { fromFrontmatter, fromOverride, overrideFile, overrideLookups, resolveDeclared, unnamedOverride } from './contract'
+import { fromFrontmatter, fromOverride, listsName, overrideFile, overrideLookups, resolveDeclared, unnamedOverride } from './contract'
 import type { Tier } from './contract'
 import { contentHash, keepLatest, reason, SaveQueue, SKILLS_SHAPE, SkillTracker, UNATTRIBUTED } from './skills'
 
@@ -150,13 +150,13 @@ export const register: Register = (on, options) => {
               // A missing file declares nothing. One that's there but can't be read, or a path that can't be worked out,
               // is set aside with its reason, so a stricter contract isn't lost without a word. `exists` can't tell
               // the two apart, because it's false for a file under a folder that can't be searched (#21). So the file
-              // is missing only when the nearest folder on its path that exists lists no such name, in any case: on a
-              // case-insensitive disk, the read may have opened `Notes.json` for `notes.json`.
+              // is missing only when the nearest folder on its path that exists lists no such name, in any case or
+              // Unicode form (`listsName`).
               let missing = false
               try {
                 for (const { dir, child } of root === undefined ? [] : overrideLookups(root, config.overrideDir, name)) {
                   if (!(await $.fs.exists(dir))) continue
-                  missing = !(await $.fs.list(dir)).some(entry => entry.name.toLowerCase() === child.toLowerCase())
+                  missing = !listsName(await $.fs.list(dir), child)
                   break
                 }
               } catch {

@@ -184,6 +184,16 @@ export function overrideLookups(root: string, overrideDir: string, name: string)
   return parts.map((child, depth) => ({ dir: [root, ...parts.slice(0, depth)].join('/') || '/', child })).reverse()
 }
 
+/**
+ * Whether a folder's listing holds `child`, a name that may be the same on its disk (#21): in any case (owner,
+ * 2026-11-09), as a case-insensitive disk opens `Notes.json` for `notes.json`, and in any Unicode form (the cold review
+ * of #22), as macOS lists in NFD a name the settings give in NFC.
+ */
+export function listsName(entries: readonly { name: string }[], child: string): boolean {
+  const key = (name: string): string => name.normalize('NFC').toLowerCase()
+  return entries.some(entry => key(entry.name) === key(child))
+}
+
 /** The override tier of a skill whose name can't name a file: none is read, and the problem says why. */
 export function unnamedOverride(skill: string): Tier {
   const message = `"${skill}" can't name an override file, so none is read: each part of the name needs letters, digits, ., - or _, starting with a letter or digit`
