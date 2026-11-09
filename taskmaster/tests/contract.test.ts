@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { fromFrontmatter, fromOverride, overrideFile, pickTier, resolveDeclared, validateDeclared } from '../hooks/contract'
+import { fromFrontmatter, fromOverride, listsName, overrideFile, overrideLookups, pickTier, resolveDeclared, validateDeclared } from '../hooks/contract'
 import type { DeclaredContract, SkillCapture } from '../types'
 import { engine, start, stateValue, until } from './engine'
 import type { EngineOptions, World } from './engine'
@@ -222,6 +222,40 @@ test("an override file is named after the skill, a plugin's name as its folder, 
   for (const name of ['é', 'ü', '.hidden', '-x', 'acme:', ':notes', 'acme:..', '']) expect(overrideFile(name)).toBeUndefined()
 })
 
+// #21: after a failed read, these say whether the file is missing: the nearest folder that exists, and the name it should list.
+test('an override file is looked for from its own folder up to the root, each folder with the next name toward the file', () => {
+  expect(overrideLookups('/repo', '.taskmaster/overrides', 'acme/notes.json')).toEqual([
+    { dir: '/repo/.taskmaster/overrides/acme', child: 'notes.json' },
+    { dir: '/repo/.taskmaster/overrides', child: 'acme' },
+    { dir: '/repo/.taskmaster', child: 'overrides' },
+    { dir: '/repo', child: '.taskmaster' },
+  ])
+  expect(overrideLookups('/repo', '.taskmaster/overrides', 'notes.json')).toEqual([
+    { dir: '/repo/.taskmaster/overrides', child: 'notes.json' },
+    { dir: '/repo/.taskmaster', child: 'overrides' },
+    { dir: '/repo', child: '.taskmaster' },
+  ])
+  expect(overrideLookups('/home/me/project', 'state', 'notes.json').at(-1)).toEqual({ dir: '/home/me/project', child: 'state' })
+  // A session rooted at the file system's root, which the read trims to ''.
+  expect(overrideLookups('', 'state', 'notes.json')).toEqual([
+    { dir: '/state', child: 'notes.json' },
+    { dir: '/', child: 'state' },
+  ])
+})
+
+// A listing holds the name in any case or Unicode form, which some disks take for the same name (owner, 2026-11-09; the
+// cold review of #22).
+test("a folder's listing holds the next name in any case or Unicode form", () => {
+  const listing = (...names: string[]) => names.map(name => ({ name }))
+  expect(listsName(listing('other.json', 'notes.json'), 'notes.json')).toBe(true)
+  expect(listsName(listing('Notes.json'), 'notes.json')).toBe(true)
+  expect(listsName(listing('notes.json'), 'Notes.json')).toBe(true)
+  expect(listsName(listing('U\u0308berschreibungen'), '\u00DCberschreibungen')).toBe(true)
+  expect(listsName(listing('\u00FCberschreibungen'), 'U\u0308berschreibungen')).toBe(true)
+  expect(listsName(listing('other.json'), 'notes.json')).toBe(false)
+  expect(listsName([], 'notes.json')).toBe(false)
+})
+
 // ------------------------------------------------------------ in a session
 
 const OVERRIDE_PATH = '/repo/.taskmaster/overrides/notes.json'
@@ -317,6 +351,114 @@ test("a failed read whose file can't be checked is set aside too, rather than ta
   await load($, {})
 
   expect((await captured(world))?.declared.problems[0]?.message).toMatch(/^the override file couldn't be read: ./)
+})
+
+// #21: a failed read is a missing file only when the nearest folder that exists lists no such name. A folder that can't
+// be searched hides a file from `exists`, but that folder's own listing, or its parent's, still shows it.
+
+/** The one override was set aside with the read's reason, in one debug line, rather than taken for a missing file. */
+async function expectSetAside(world: World, reads: string[] = [OVERRIDE_PATH]) {
+  const declared = (await captured(world))?.declared
+  expect(declared?.source).toBe('none')
+  expect(declared?.problems.map(problem => problem.where)).toEqual(['override'])
+  expect(declared?.problems[0]?.message).toMatch(/^the override file couldn't be read: ./)
+  expect(world.logs.map(line => line.to)).toEqual(['debug'])
+  expect(world.reads).toEqual(reads)
+}
+
+test("an override under a folder that can't be searched is set aside with its reason, not taken for missing", async ($, on) => {
+  const world = await session($, on, { files: { [OVERRIDE_PATH]: JSON.stringify(BLOCK) }, inaccessibleDirs: ['/repo/.taskmaster/overrides'] })
+  await load($, {})
+
+  await expectSetAside(world)
+})
+
+test("an override under a folder above it that can't be searched is set aside too", async ($, on) => {
+  const world = await session($, on, { files: { [OVERRIDE_PATH]: JSON.stringify(BLOCK) }, inaccessibleDirs: ['/repo/.taskmaster'] })
+  await load($, {})
+
+  await expectSetAside(world)
+})
+
+test("an override its folder lists but that can't be reached is set aside, as a broken link would be", async ($, on) => {
+  const world = await session($, on, { danglingLinks: [OVERRIDE_PATH] })
+  await load($, {})
+
+  await expectSetAside(world)
+})
+
+// The owner chose on 2026-11-09 to compare listed names without regard to case (Codex's review of #22): on a
+// case-insensitive disk, reading `notes.json` opens `Notes.json`, so a listing that holds it in another case doesn't
+// show the file is missing. On a case-sensitive disk, such a file gives a debug line where it gave none.
+test('an override its folder lists in another case is set aside, as a case-insensitive disk may have opened it', async ($, on) => {
+  const world = await session($, on, { unreadableFiles: ['/repo/.taskmaster/overrides/Notes.json'] })
+  await load($, {})
+
+  await expectSetAside(world)
+})
+
+test('a skill named in capitals whose file is listed in lower case is set aside the same way', async ($, on) => {
+  const world = await session($, on, { unreadableFiles: [OVERRIDE_PATH] })
+  await $.skill.prompt({ skill: 'Notes', text: '1. Write the note.', frontmatter: {}, source: 'projectSettings' })
+
+  const declared = (await captured(world))?.declared
+  expect(declared?.problems.map(problem => problem.where)).toEqual(['override'])
+  expect(world.reads).toEqual(['/repo/.taskmaster/overrides/Notes.json'])
+})
+
+test("a plugin's override folder listed in another case is set aside too", async ($, on) => {
+  const world = await session($, on, { files: { '/repo/.taskmaster/overrides/Acme/notes.json': JSON.stringify(BLOCK) } })
+  await $.skill.prompt({ skill: 'acme:notes', text: '1. Write the note.', frontmatter: {}, source: 'plugin', pluginName: 'acme' })
+
+  await expectSetAside(world, ['/repo/.taskmaster/overrides/acme/notes.json'])
+})
+
+// The cold review of #22 (2026-11-09). A disk that ignores Unicode form, as macOS does, lists in NFD a name the settings
+// give in NFC. The engine's exact paths stand for a `cfg` that lists its names but can't be searched, so the walk reaches
+// its listing.
+test('an override folder listed in another Unicode form is set aside too', { options: { overrideDir: 'cfg/\u00DCberschreibungen' } }, async ($, on) => {
+  const world = await session($, on, { unreadableFiles: ['/repo/cfg/U\u0308berschreibungen/notes.json'] })
+  await load($, {})
+
+  await expectSetAside(world, ['/repo/cfg/\u00DCberschreibungen/notes.json'])
+})
+
+test("an override that can't be read in the folder the settings name is set aside too", { options: { overrideDir: 'state/overrides' } }, async ($, on) => {
+  const world = await session($, on, { unreadableFiles: ['/repo/state/overrides/notes.json'] })
+  await load($, {})
+
+  await expectSetAside(world, ['/repo/state/overrides/notes.json'])
+})
+
+test('an override whose session folder leads nowhere is set aside, since no folder on its path can say it is missing', async ($, on) => {
+  const world = await session($, on, { danglingLinks: ['/repo'] })
+  await load($, {})
+
+  await expectSetAside(world)
+})
+
+test("an override whose session folder can't be worked out is set aside, not taken for missing", async ($, on) => {
+  const world = await session($, on, { failRoot: true })
+  await load($, {})
+
+  await expectSetAside(world, [])
+})
+
+test('an override folder that holds other files but none for this skill stays silent', async ($, on) => {
+  const world = await session($, on, { files: { '/repo/.taskmaster/overrides/other.json': '{}' } })
+  await load($, {})
+
+  expect((await captured(world))?.declared).toEqual({ source: 'none', problems: [] })
+  expect(world.logs).toEqual([])
+})
+
+test("a plugin's override folder that isn't there stays silent, though the project folder holds a file of the skill's own name", async ($, on) => {
+  const world = await session($, on, { files: { [OVERRIDE_PATH]: JSON.stringify(BLOCK) } })
+  await $.skill.prompt({ skill: 'acme:notes', text: '1. Write the note.', frontmatter: {}, source: 'plugin', pluginName: 'acme' })
+
+  expect((await captured(world))?.declared).toEqual({ source: 'none', problems: [] })
+  expect(world.logs).toEqual([])
+  expect(world.reads).toEqual(['/repo/.taskmaster/overrides/acme/notes.json'])
 })
 
 test('a contract set aside is logged to the debug log, never the transcript', async ($, on) => {

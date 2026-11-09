@@ -10,7 +10,7 @@ import type { Register } from 'claude-code'
 import type { Io, SkillCapture, WatchedEvent } from '../types'
 import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
-import { fromFrontmatter, fromOverride, overrideFile, resolveDeclared, unnamedOverride } from './contract'
+import { fromFrontmatter, fromOverride, listsName, overrideFile, overrideLookups, resolveDeclared, unnamedOverride } from './contract'
 import type { Tier } from './contract'
 import { contentHash, keepLatest, reason, SaveQueue, SKILLS_SHAPE, SkillTracker, UNATTRIBUTED } from './skills'
 
@@ -140,17 +140,28 @@ export const register: Register = (on, options) => {
           // A name that can't name a file reads none, and the problem says why.
           const name = overrideFile(e.skill)
           let file: string | undefined
-          let path: string | undefined
+          let root: string | undefined
           let unreadable: string | undefined
           if (name !== undefined) {
             try {
-              const root = (await $.session.root()).replace(/\/+$/, '')
-              path = `${root}/${config.overrideDir}/${name}`
-              file = await $.fs.read(path)
+              root = (await $.session.root()).replace(/\/+$/, '')
+              file = await $.fs.read(`${root}/${config.overrideDir}/${name}`)
             } catch (error) {
               // A missing file declares nothing. One that's there but can't be read, or a path that can't be worked out,
-              // is set aside with its reason, so a stricter contract isn't lost without a word.
-              const missing = path !== undefined && !(await $.fs.exists(path).catch(() => true))
+              // is set aside with its reason, so a stricter contract isn't lost without a word. `exists` can't tell
+              // the two apart, because it's false for a file under a folder that can't be searched (#21). So the file
+              // is missing only when the nearest folder on its path that exists lists no such name, in any case or
+              // Unicode form (`listsName`).
+              let missing = false
+              try {
+                for (const { dir, child } of root === undefined ? [] : overrideLookups(root, config.overrideDir, name)) {
+                  if (!(await $.fs.exists(dir))) continue
+                  missing = !listsName(await $.fs.list(dir), child)
+                  break
+                }
+              } catch {
+                // An `exists` or `list` that fails confirms nothing.
+              }
               if (!missing) unreadable = reason(error)
             }
           }

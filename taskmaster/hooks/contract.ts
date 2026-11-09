@@ -173,6 +173,27 @@ export function overrideFile(skill: string): string | undefined {
   return parts.every(part => FILE_PART.test(part)) ? `${parts.join('/')}.json` : undefined
 }
 
+/**
+ * The folders that say whether an override file at `${root}/${overrideDir}/${name}` is missing, nearest first, each with
+ * the next name on the path toward the file. After a failed read, the file is missing only when the first of these
+ * folders that exists lists no such name (#21). None is above `root`.
+ */
+export function overrideLookups(root: string, overrideDir: string, name: string): { dir: string; child: string }[] {
+  const parts = `${overrideDir}/${name}`.split('/')
+  // A session rooted at the file system's root arrives trimmed to '', whose folder is '/'.
+  return parts.map((child, depth) => ({ dir: [root, ...parts.slice(0, depth)].join('/') || '/', child })).reverse()
+}
+
+/**
+ * Whether a folder's listing holds `child`, a name that may be the same on its disk (#21): in any case (owner,
+ * 2026-11-09), as a case-insensitive disk opens `Notes.json` for `notes.json`, and in any Unicode form (the cold review
+ * of #22), as macOS lists in NFD a name the settings give in NFC.
+ */
+export function listsName(entries: readonly { name: string }[], child: string): boolean {
+  const key = (name: string): string => name.normalize('NFC').toLowerCase()
+  return entries.some(entry => key(entry.name) === key(child))
+}
+
 /** The override tier of a skill whose name can't name a file: none is read, and the problem says why. */
 export function unnamedOverride(skill: string): Tier {
   const message = `"${skill}" can't name an override file, so none is read: each part of the name needs letters, digits, ., - or _, starting with a letter or digit`
