@@ -93,10 +93,16 @@ export type EngineOptions = {
   unreadableFiles?: string[]
   /** `$.fs.exists` rejects, as it does for a network location. */
   failExists?: boolean
-  /** Folders that exist but can't be searched: `$.fs.list` refuses them, and nothing under them exists or reads. */
+  /**
+   * Folders that exist but can be neither listed nor searched, as at mode 000: `$.fs.list` refuses them, and nothing
+   * under them exists or reads. A folder that lists its names but can't be searched, as at 644, is modelled by
+   * `danglingLinks` on what it holds.
+   */
   inaccessibleDirs?: string[]
   /** Paths their folder lists, as a symbolic link, that `$.fs.exists` calls false and `$.fs.read` refuses, as a broken link would be. */
   danglingLinks?: string[]
+  /** `$.session.root()` rejects, as it would if the engine couldn't work out the session's folder. */
+  failRoot?: boolean
 }
 
 // Nothing sits beneath the plugin in a test: these hooks stand for the
@@ -209,7 +215,10 @@ export function engine(on: On, options: EngineOptions = {}): World {
   const dangling = (path: string): boolean => options.danglingLinks?.includes(path) ?? false
   const isFile = (path: string): boolean => options.files?.[path] !== undefined || (options.unreadableFiles?.includes(path) ?? false)
   const holds = (path: string): boolean => known().some(entry => entry.startsWith(`${path}/`))
-  on('session.root', () => ({ value: ROOT }))
+  on('session.root', () => {
+    if (options.failRoot) throw new Error('session root failed')
+    return { value: ROOT }
+  })
   on('fs.read', async (_, e) => {
     world.reads.push(e.path)
     if (heldRead) {
