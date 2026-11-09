@@ -374,6 +374,41 @@ test("an override its folder lists but that can't be reached is set aside, as a 
   await expectSetAside(world)
 })
 
+// The owner chose on 2026-11-09 to compare listed names without regard to case (Codex's review of #22): on a
+// case-insensitive disk, reading `notes.json` opens `Notes.json`, so a listing that holds it in another case doesn't
+// show the file is missing. On a case-sensitive disk, such a file gives a debug line where it gave none.
+test('an override its folder lists in another case is set aside, as a case-insensitive disk may have opened it', async ($, on) => {
+  const world = await session($, on, { unreadableFiles: ['/repo/.taskmaster/overrides/Notes.json'] })
+  await load($, {})
+
+  await expectSetAside(world)
+})
+
+test('a skill named in capitals whose file is listed in lower case is set aside the same way', async ($, on) => {
+  const world = await session($, on, { unreadableFiles: [OVERRIDE_PATH] })
+  await $.skill.prompt({ skill: 'Notes', text: '1. Write the note.', frontmatter: {}, source: 'projectSettings' })
+
+  const declared = (await captured(world))?.declared
+  expect(declared?.problems.map(problem => problem.where)).toEqual(['override'])
+  expect(world.reads).toEqual(['/repo/.taskmaster/overrides/Notes.json'])
+})
+
+test("a plugin's override folder listed in another case is set aside too", async ($, on) => {
+  const path = '/repo/.taskmaster/overrides/acme/notes.json'
+  const world = await session($, on, {
+    files: { '/repo/.taskmaster/overrides/Acme/notes.json': JSON.stringify(BLOCK) },
+    inaccessibleDirs: ['/repo/.taskmaster/overrides/Acme'],
+  })
+  await $.skill.prompt({ skill: 'acme:notes', text: '1. Write the note.', frontmatter: {}, source: 'plugin', pluginName: 'acme' })
+
+  const declared = (await captured(world))?.declared
+  expect(declared?.source).toBe('none')
+  expect(declared?.problems.map(problem => problem.where)).toEqual(['override'])
+  expect(declared?.problems[0]?.message).toMatch(/^the override file couldn't be read: ./)
+  expect(world.logs.map(line => line.to)).toEqual(['debug'])
+  expect(world.reads).toEqual([path])
+})
+
 test('an override folder that holds other files but none for this skill stays silent', async ($, on) => {
   const world = await session($, on, { files: { '/repo/.taskmaster/overrides/other.json': '{}' } })
   await load($, {})
