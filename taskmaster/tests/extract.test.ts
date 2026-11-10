@@ -112,7 +112,7 @@ test('a reply in one code fence is read, and a reply with anything else around i
   const json = JSON.stringify(REPLY, null, 2)
   expect(validateExtraction('```json\n' + json + '\n```').extraction?.kind).toBe('workflow')
   expect(validateExtraction('\n```\n' + json + '\n```\n').extraction?.kind).toBe('workflow')
-  for (const reply of ['Here it is:\n```json\n' + json + '\n```', json + '\nDone.', '', 'workflow']) {
+  for (const reply of ['Here it is:\n```json\n' + json + '\n```', json + '\nDone.', '```json\n' + json + '\n```\nDone.', '', 'workflow']) {
     const { extraction, problems } = validateExtraction(reply)
     expect(extraction).toBeUndefined()
     expect(problems).toEqual([expect.stringMatching(/^the reply is not JSON: /)])
