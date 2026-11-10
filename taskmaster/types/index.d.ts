@@ -110,6 +110,19 @@ export type DeclaredContract = {
   suggestedBy?: string
 }
 
+/**
+ * What the model read in a skill (plan F1.3): its kind, how sure the model is, and the steps, shaped as a declared
+ * contract's. It carries no mode: the level comes from the tier and the parse (F1.4).
+ */
+export type Extraction = {
+  kind: 'workflow' | 'reference' | 'persona'
+  /** From 0 to 1. */
+  confidence: number
+  steps: DeclaredStep[]
+  /** Step ids that need the user's OK first. */
+  confirmBefore: string[]
+}
+
 /** Why a declared contract wasn't used. */
 export type ContractProblem = { where: 'frontmatter' | 'override'; message: string }
 

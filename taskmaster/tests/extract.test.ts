@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { bodyKey, fileBody } from '../hooks/extract'
+import { bodyKey, fileBody, validateExtraction } from '../hooks/extract'
 import { promptBody } from '../hooks/parse'
 
 // P1.4: the key a skill's extraction is cached under. The strings are skill.prompt's own, seen live on 2.1.322: `path`
@@ -64,4 +64,74 @@ test("a file with no final newline keeps its typed words in the prompt's body, s
   const prompt = `Base directory for this skill: ${DIR}\n\n${bare}`
   expect(promptBody(`${prompt}\n\nARGUMENTS: some typed words`)).toBe(`${bare}\n\nARGUMENTS: some typed words`)
   expect(await bodyKey(promptBody(prompt))).toBe(await bodyKey(fileBody(`---\nname: notes\n---\n${bare}`)))
+})
+
+// ------------------------------------------------------------ validateExtraction
+// F1.3: the model's reply is JSON, checked as strictly as a declared contract and used whole or not at all. Its steps
+// and confirm_before are a declared block's, so both kinds of contract read alike. The level is never the model's to set.
+
+const REPLY = {
+  kind: 'workflow',
+  confidence: 0.9,
+  steps: [
+    { id: 'S1', title: 'Write the note' },
+    { id: 'S2', title: ' Run the tests ', mandatory: false, verify: { bash: 'npm test' } },
+  ],
+  confirm_before: ['S2'],
+}
+
+const problemsOf = (value: unknown) => validateExtraction(JSON.stringify(value)).problems.join('; ')
+
+test("a valid reply becomes an extraction, with a declared contract's defaults filled in", () => {
+  expect(validateExtraction(JSON.stringify(REPLY))).toEqual({
+    extraction: {
+      kind: 'workflow',
+      confidence: 0.9,
+      steps: [
+        { id: 'S1', title: 'Write the note', mandatory: true },
+        { id: 'S2', title: 'Run the tests', mandatory: false, verify: { bash: 'npm test', exit: 0 } },
+      ],
+      confirmBefore: ['S2'],
+    },
+    problems: [],
+  })
+  expect(validateExtraction(JSON.stringify({ ...REPLY, confidence: 0 })).extraction?.confidence).toBe(0)
+  expect(validateExtraction(JSON.stringify({ ...REPLY, confidence: 1 })).extraction?.confidence).toBe(1)
+})
+
+test('a reference or persona skill needs no steps, and a workflow needs at least one', () => {
+  for (const kind of ['reference', 'persona']) {
+    expect(validateExtraction(JSON.stringify({ kind, confidence: 0.8 }))).toEqual({ extraction: { kind, confidence: 0.8, steps: [], confirmBefore: [] }, problems: [] })
+    expect(validateExtraction(JSON.stringify({ kind, confidence: 0.8, steps: [] })).extraction?.steps).toEqual([])
+  }
+  expect(problemsOf({ kind: 'workflow', confidence: 0.8 })).toBe('steps must be a list')
+  expect(problemsOf({ kind: 'workflow', confidence: 0.8, steps: [] })).toBe('a workflow needs at least one step')
+})
+
+test('a reply in one code fence is read, and a reply with anything else around it is not JSON', () => {
+  const json = JSON.stringify(REPLY, null, 2)
+  expect(validateExtraction('```json\n' + json + '\n```').extraction?.kind).toBe('workflow')
+  expect(validateExtraction('\n```\n' + json + '\n```\n').extraction?.kind).toBe('workflow')
+  for (const reply of ['Here it is:\n```json\n' + json + '\n```', json + '\nDone.', '```json\n' + json + '\n```\nDone.', '', 'workflow']) {
+    const { extraction, problems } = validateExtraction(reply)
+    expect(extraction).toBeUndefined()
+    expect(problems).toEqual([expect.stringMatching(/^the reply is not JSON: /)])
+  }
+})
+
+test('an invalid reply is set aside whole, with every reason', () => {
+  for (const value of [null, [], 'workflow', 3]) expect(problemsOf(value)).toBe('the reply must be an object of keys')
+  expect(problemsOf({ ...REPLY, kind: 'guide' })).toBe('kind must be one of workflow, reference, persona')
+  expect(problemsOf({ confidence: 0.9, steps: REPLY.steps })).toBe('kind must be one of workflow, reference, persona')
+  for (const confidence of [undefined, '0.9', -0.1, 1.1, null]) expect(problemsOf({ ...REPLY, confidence })).toBe('confidence must be a number from 0 to 1')
+  // The model doesn't set the level, a version or where the contract came from.
+  for (const key of ['mode', 'version', 'origin', 'suggested_by', 'notes']) expect(problemsOf({ ...REPLY, [key]: 'enforce' })).toBe(`unknown key "${key}"`)
+  // A declared block's own checks apply to the steps.
+  expect(problemsOf({ ...REPLY, steps: [{ id: 'S 1', title: 'Write the note' }], confirm_before: [] })).toBe('step 1 needs an id of letters, digits, - or _')
+  expect(problemsOf({ ...REPLY, confirm_before: ['S9'] })).toBe('confirm_before names "S9", which is no step')
+  expect(problemsOf({ ...REPLY, steps: 'none' })).toMatch(/^steps must be a list/)
+  // Every reason, and nothing half-used.
+  const both = validateExtraction(JSON.stringify({ ...REPLY, kind: 'guide', confidence: 2 }))
+  expect(both.extraction).toBeUndefined()
+  expect(both.problems).toEqual(['kind must be one of workflow, reference, persona', 'confidence must be a number from 0 to 1'])
 })
