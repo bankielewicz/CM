@@ -176,10 +176,43 @@ test('an override that isn\'t JSON, or holds an invalid block, is set aside with
   expect(wrapped.problems[0]?.message).toMatch(/unknown key "taskmaster"/)
 })
 
-test('frontmatter beats an override', () => {
+// P1.4: an override beats a skill's frontmatter, whatever its source (owner, 2026-11-06). That decision changed this
+// test's assertions, which had frontmatter first.
+test('an override beats a valid block', () => {
   const resolution = resolveDeclared(fromFrontmatter({ taskmaster: BLOCK }), fromOverride(JSON.stringify({ mode: 'advisory', steps: [] })))
+  expect(resolution.source).toBe('override')
+  expect(resolution.contract).toEqual({ version: 1, mode: 'advisory', steps: [], confirmBefore: [] })
+  expect(resolution.problems).toEqual([])
+})
+
+test('a block alone still applies, and an override set aside leaves it in place with the reason', () => {
+  expect(resolveDeclared(fromFrontmatter({ taskmaster: BLOCK }), fromOverride(undefined))).toEqual({ source: 'frontmatter', contract: CONTRACT, problems: [] })
+  expect(resolveDeclared(fromFrontmatter({ taskmaster: BLOCK }))).toEqual({ source: 'frontmatter', contract: CONTRACT, problems: [] })
+
+  const resolution = resolveDeclared(fromFrontmatter({ taskmaster: BLOCK }), fromOverride('mode: enforce'))
   expect(resolution.source).toBe('frontmatter')
   expect(resolution.contract).toEqual(CONTRACT)
+  expect(resolution.problems.map(problem => problem.where)).toEqual(['override'])
+})
+
+// The carve-out (owner, 2026-11-06): a skill an organisation manages keeps its valid block first, so no override loosens it.
+test("a managed skill's valid block beats its override, and an invalid or flagged one falls through to it", () => {
+  const override = fromOverride(JSON.stringify({ mode: 'advisory', steps: [] }))
+  const loosened = { version: 1, mode: 'advisory', steps: [], confirmBefore: [] }
+
+  expect(resolveDeclared(fromFrontmatter({ taskmaster: BLOCK }), override, true)).toEqual({ source: 'frontmatter', contract: CONTRACT, problems: [] })
+
+  const invalid = resolveDeclared(fromFrontmatter({ taskmaster: { steps: 'one' } }), override, true)
+  expect(invalid.source).toBe('override')
+  expect(invalid.contract).toEqual(loosened)
+  expect(invalid.problems.map(problem => problem.where)).toEqual(['frontmatter'])
+
+  const flagged = resolveDeclared(fromFrontmatter({ taskmaster: BLOCK }, 'a key was left out'), override, true)
+  expect(flagged.source).toBe('override')
+  expect(flagged.contract).toEqual(loosened)
+
+  expect(resolveDeclared(fromFrontmatter({}), override, true).source).toBe('override')
+  expect(resolveDeclared(fromFrontmatter({}), undefined, true)).toEqual({ source: 'none', problems: [] })
 })
 
 test('an invalid block falls back to the override, and keeps the reason', () => {
@@ -200,7 +233,7 @@ test('mode: off is still a declared contract', () => {
   expect(resolution.contract?.mode).toBe('off')
 })
 
-test('the order is frontmatter, then override, then the model, then the parse', () => {
+test('a declared contract comes first, then the model, then the parse', () => {
   const declared = (source: 'frontmatter' | 'override' | 'none') => ({ source, problems: [] })
   expect(pickTier({ declared: declared('frontmatter'), llm: true, heuristic: true })).toBe('frontmatter')
   expect(pickTier({ declared: declared('override'), llm: true, heuristic: true })).toBe('override')
@@ -267,15 +300,18 @@ async function captured(world: World): Promise<SkillCapture | undefined> {
   return list()?.at(-1)
 }
 
-async function load($: Engine, frontmatter: Frontmatter, frontmatterProblem?: string) {
+async function load($: Engine, frontmatter: Frontmatter, frontmatterProblem?: string, source = 'projectSettings') {
   return $.skill.prompt({
     skill: 'notes',
     text: '1. Write the note.',
     frontmatter,
     ...(frontmatterProblem === undefined ? {} : { frontmatterProblem }),
-    source: 'projectSettings',
+    source,
   })
 }
+
+const LOOSER = { version: 1, mode: 'advisory', steps: [], confirmBefore: [] }
+const LOOSER_FILE = JSON.stringify({ mode: 'advisory', steps: [] })
 
 async function session($: Engine, on: Parameters<typeof engine>[0], options: EngineOptions = {}): Promise<World> {
   const world = engine(on, options)
@@ -283,12 +319,64 @@ async function session($: Engine, on: Parameters<typeof engine>[0], options: Eng
   return world
 }
 
-test('a skill with a valid taskmaster: block uses it, and reads no override file', async ($, on) => {
-  const world = await session($, on, { files: { [OVERRIDE_PATH]: JSON.stringify({ steps: [] }) } })
+// P1.4 (owner, 2026-11-06): the override file is read whatever the frontmatter declares, and wins. That decision changed
+// this test's assertions, which had the block win with no file read.
+test('a skill with a valid taskmaster: block still reads its override file, which wins', async ($, on) => {
+  const world = await session($, on, { files: { [OVERRIDE_PATH]: LOOSER_FILE } })
+  await load($, { taskmaster: BLOCK })
+
+  expect((await captured(world))?.declared).toEqual({ source: 'override', contract: LOOSER, problems: [] })
+  expect(world.reads).toEqual([OVERRIDE_PATH])
+})
+
+test('a skill with a valid block and no override file uses the block, and logs nothing', async ($, on) => {
+  const world = await session($, on)
   await load($, { taskmaster: BLOCK })
 
   expect((await captured(world))?.declared).toEqual({ source: 'frontmatter', contract: CONTRACT, problems: [] })
+  expect(world.reads).toEqual([OVERRIDE_PATH])
+  expect(world.logs).toEqual([])
+})
+
+test("a skill with a valid block keeps it when its override file can't be used, and the debug log says why", async ($, on) => {
+  const world = await session($, on, { files: { [OVERRIDE_PATH]: 'mode: enforce' } })
+  await load($, { taskmaster: BLOCK })
+
+  const declared = (await captured(world))?.declared
+  expect(declared?.source).toBe('frontmatter')
+  expect(declared?.contract).toEqual(CONTRACT)
+  expect(declared?.problems.map(problem => problem.where)).toEqual(['override'])
+  expect(world.logs.map(line => line.to)).toEqual(['debug'])
+})
+
+// The carve-out (owner, 2026-11-06): its file needn't be read when the block is valid.
+test("a managed skill's valid block beats its override file, which isn't read", async ($, on) => {
+  const world = await session($, on, { files: { [OVERRIDE_PATH]: LOOSER_FILE } })
+  await load($, { taskmaster: BLOCK }, undefined, 'policySettings')
+
+  expect((await captured(world))?.declared).toEqual({ source: 'frontmatter', contract: CONTRACT, problems: [] })
   expect(world.reads).toEqual([])
+  expect(world.logs).toEqual([])
+})
+
+test("a managed skill whose block is invalid, flagged or missing falls through to its override file", async ($, on) => {
+  const world = await session($, on, { files: { [OVERRIDE_PATH]: LOOSER_FILE } })
+  const list = () => stateValue(world, 'taskmaster/skills') as SkillCapture[] | undefined
+
+  await load($, { taskmaster: { steps: 'one' } }, undefined, 'policySettings')
+  const invalid = await captured(world)
+  expect(invalid?.declared.source).toBe('override')
+  expect(invalid?.declared.contract).toEqual(LOOSER)
+  expect(invalid?.declared.problems.map(problem => problem.where)).toEqual(['frontmatter'])
+
+  await load($, { taskmaster: BLOCK }, 'a key was left out', 'policySettings')
+  await until(world, () => list()?.at(-1)?.frontmatterProblem !== undefined)
+  expect(list()?.at(-1)?.declared.source).toBe('override')
+
+  await load($, {}, undefined, 'policySettings')
+  await until(world, () => world.reads.length === 3 && list()?.at(-1)?.frontmatterProblem === undefined)
+  expect(list()?.at(-1)?.declared).toEqual({ source: 'override', contract: LOOSER, problems: [] })
+  expect(world.reads).toEqual([OVERRIDE_PATH, OVERRIDE_PATH, OVERRIDE_PATH])
 })
 
 test('a skill with no block reads its override file from the project\'s override folder', async ($, on) => {
