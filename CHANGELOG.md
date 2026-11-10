@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- A skill's override file now beats its `taskmaster:` frontmatter block, and is read whatever the block declares (P1.4). A skill an organisation manages (`policySettings`) keeps its valid block first.
 - The deterministic skill parse (P1.2) now reads plain text straight after a list item's own text as part of the item, so a list runs on past such a line, and reads a list straight after a block tag such as `<div>`, with no blank line between, as HTML, so it gives no steps.
 - The deterministic skill parse (P1.2) now reads a code fence inside an HTML block as HTML, as CommonMark does, so the block's `MUST` lines count as rules and its commands aren't candidates. It reads the commands of a substitution where a command starts, so `$(npm test) && make lint` gives both, and none inside one closed within a word, so `x=$(cd a; npm test)` gives nothing where it gave `npm test)`.
 - Gate A passed (GO, 2026-11-03). The plan records the result in §10.1, and the README no longer describes the check as open.
