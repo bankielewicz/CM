@@ -407,6 +407,29 @@ test("a skill whose name can't name a file reads no override, and the debug log 
   expect(world.logs.map(line => line.to)).toEqual(['debug'])
 })
 
+// P1.4: the file is looked for whatever the block declares, so a name that can't name one is now reported beside a valid
+// block too. A managed skill's valid block needs no file, so its name is never asked.
+test("a skill with a valid block whose name can't name a file keeps the block, and the debug log says why no override is read", async ($, on) => {
+  const world = await session($, on)
+  await $.skill.prompt({ skill: '../notes', text: '1. Write the note.', frontmatter: { taskmaster: BLOCK }, source: 'projectSettings' })
+
+  const declared = (await captured(world))?.declared
+  expect(declared?.source).toBe('frontmatter')
+  expect(declared?.contract).toEqual(CONTRACT)
+  expect(declared?.problems.map(problem => problem.where)).toEqual(['override'])
+  expect(declared?.problems[0]?.message).toMatch(/"\.\.\/notes" can't name an override file/)
+  expect(world.reads).toEqual([])
+  expect(world.logs.map(line => line.to)).toEqual(['debug'])
+})
+
+test("a managed skill with a valid block whose name can't name a file is told nothing, since no override is looked for", async ($, on) => {
+  const world = await session($, on)
+  await $.skill.prompt({ skill: '../notes', text: '1. Write the note.', frontmatter: { taskmaster: BLOCK }, source: 'policySettings' })
+
+  expect((await captured(world))?.declared).toEqual({ source: 'frontmatter', contract: CONTRACT, problems: [] })
+  expect(world.logs).toEqual([])
+})
+
 test('the override folder comes from the settings', { options: { overrideDir: 'state/overrides' } }, async ($, on) => {
   const world = await session($, on)
   await load($, {})
