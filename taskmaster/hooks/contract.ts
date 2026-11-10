@@ -152,11 +152,18 @@ export function fromOverride(fileText: string | undefined, readError?: string): 
   return contract ? { contract, problems: [] } : { problems: problemsAt('override', problems) }
 }
 
-/** Frontmatter beats an override. The reasons any contract was set aside are kept. */
-export function resolveDeclared(frontmatter: Tier, override?: Tier): DeclaredResolution {
+/** The source of a skill an organisation manages, in the engine's word (`SkillSource`). */
+export const MANAGED_SOURCE = 'policySettings'
+
+/**
+ * An override beats frontmatter, whatever the skill's source (owner, 2026-11-06): the person who wrote it chose it. The
+ * one exception is a `managed` skill, which keeps its valid block first, so no override loosens a mandated workflow. The
+ * reasons any contract was set aside are kept.
+ */
+export function resolveDeclared(frontmatter: Tier, override?: Tier, managed = false): DeclaredResolution {
   const problems = [...frontmatter.problems, ...(override?.problems ?? [])]
+  if (override?.contract && !(managed && frontmatter.contract)) return { source: 'override', contract: override.contract, problems }
   if (frontmatter.contract) return { source: 'frontmatter', contract: frontmatter.contract, problems }
-  if (override?.contract) return { source: 'override', contract: override.contract, problems }
   return { source: 'none', problems }
 }
 
