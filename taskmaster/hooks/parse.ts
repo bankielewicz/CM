@@ -94,6 +94,19 @@ export function parseSkill(text: string, frontmatter: Readonly<Record<string, un
 
 /** The body's lines with their 1-based numbers in the full text: header and ARGUMENTS left out. */
 function body(text: string): { text: string; number: number }[] {
+  return frame(text).lines
+}
+
+/**
+ * The skill's own words in skill.prompt's text, as one string: header and ARGUMENTS left out. The arguments follow the body
+ * as "\n\nARGUMENTS: ", so the blank line that separator adds goes with them.
+ */
+export function promptBody(text: string): string {
+  const { lines, cut } = frame(text)
+  return (cut ? lines.slice(0, -1) : lines).map(line => line.text).join('\n')
+}
+
+function frame(text: string): { lines: { text: string; number: number }[]; cut: boolean } {
   const all = text.split('\n').map((line, index) => ({ text: line.replace(/\r$/, ''), number: index + 1 }))
   let start = 0
   if (all[0]?.text.startsWith(HEADER)) start = 1
@@ -104,7 +117,7 @@ function body(text: string): { text: string; number: number }[] {
   const end = all.findIndex(
     (line, index) => line.text.startsWith(ARGUMENTS) && all[index - 1]?.text === '' && all[index - 2]?.text === '',
   )
-  return all.slice(start, end === -1 ? all.length : end)
+  return { lines: all.slice(start, end === -1 ? all.length : end), cut: end !== -1 }
 }
 
 /**

@@ -19,6 +19,7 @@ test("a skill file's body is what follows its frontmatter block", () => {
   expect(fileBody(`${BODY}\n---\nnot: frontmatter\n---\n`)).toBe(`${BODY}\n---\nnot: frontmatter\n---\n`)
   expect(fileBody('---\nname: notes\nnever closed\n')).toBe('---\nname: notes\nnever closed\n')
   expect(fileBody('---\nname: notes\n---')).toBe('')
+  expect(fileBody('---\n---\nBody.\n')).toBe('Body.\n')
   // A rule line inside the body isn't the block's end.
   expect(fileBody(`---\nname: notes\n---\n${BODY}\n---\nMore.\n`)).toBe(`${BODY}\n---\nMore.\n`)
   expect(fileBody('')).toBe('')
