@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Taskmaster is a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. `docs/taskmaster-plan.md` is the design, and `docs/phase-1-tasks.md` is the build order. The mod is `taskmaster/`, built test-first one task at a time. So far it's the P1.0 scaffold: it reads its settings and runs a startup self-check, and every hook passes its event on unchanged. The Phase 0 spike, an observe-only mod with one-shot probes that answered the Gate A checks, was deleted after Gate A passed. Its result is in plan §10.1, and its files are in git history at [`d46b356`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike).
+Taskmaster is a planned Claude Code mod that holds Claude to the workflow of whatever skill it loads. `docs/taskmaster-plan.md` is the design, and `docs/phase-1-tasks.md` is the build order. The mod is `taskmaster/`, built test-first one task at a time. So far it only observes: it reads its settings, runs a startup self-check, and records each skill that loads with its loop and declared contract. Every hook still passes its event on unchanged, and nothing is enforced or shown. `docs/phase-1-tasks.md` says which tasks are done. The Phase 0 spike, an observe-only mod with one-shot probes that answered the Gate A checks, was deleted after Gate A passed. Its result is in plan §10.1, and its files are in git history at [`d46b356`](https://github.com/bankielewicz/CM/tree/d46b356/spike/taskmaster-spike).
 
 ## Commands
 
@@ -48,6 +48,10 @@ How the bar is enforced:
 - `.claude/settings.json` denies Claude edits to the same files and `gh pr merge`, and a test keeps its list in step with `PROTECTED` in `scripts/gate-guard.mjs`. If one of those files needs changing, give the owner the exact edit; don't look for another way to write it.
 - The 95 lives in `THRESHOLD` in `scripts/mod-coverage.mjs` and in the GitHub ruleset, so change them together. The ruleset reads lines only, so only the `mod-coverage` check holds functions to it. Line coverage alone isn't enough, because loading a file runs every line of its one-line functions. Branch coverage is printed but not required. If the bar can't be met, ask; don't lower it or exclude files.
 
+### Test-first with the three subagents
+
+`.claude/agents/` holds `tdd-test-writer`, `tdd-implementer` and `tdd-verifier`, which carry out one test-first change from a written plan in `docs/plans/`. `tdd-agents/` holds the copies they were installed from (DevForgeAI's SPEC-020 build), so change both together. `docs/plans/2026-11-09-listsname-case-fold.md` is the first such plan, and its section 9 is the orchestration: each agent starts new with only the task-message lines its description names, no agent sees another's reply, and the main conversation checks the worktree between agents. Start that session in the repo root, never in the plan's worktree, because the Stop hook measures the folder the session started in and the worktree holds failing tests between the red and green commits.
+
 ## Mod architecture
 
 - `hooks/register.tsx` registers every hook. At `session.start` it builds the `Io` table (`types/index.d.ts`), the engine calls helpers get in place of `$`.
@@ -61,7 +65,7 @@ How the bar is enforced:
 
 ## Mod API constraints
 
-These were learned live on builds 2.1.317 and 2.1.318 and apply to the real mod too. Plan §9 ("Learned while building the spike") has the full list; read it before writing hook code.
+These were learned live on builds 2.1.317 to 2.1.319 and apply to the real mod too. Plan §9 ("Learned while building the spike") has the full list; read it before writing hook code.
 
 - `$` can't be passed to a helper, bound or stored. Spell every call `$.noun.method(...)` where it's made. A closure written inside a hook may use it after the hook answers, as the engine's own `$.process.spawn` example does ("the loop runs on after the hook returns"), and `register.tsx`'s queued saves do. `session.start` builds one table of closures (`Io` in `register.tsx`) for helpers to use, and hooks that fire earlier buffer their data.
 - `atom({ plugin, key })` must name both as string literals, not constants.
