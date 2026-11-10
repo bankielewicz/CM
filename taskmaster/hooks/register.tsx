@@ -10,7 +10,7 @@ import type { Register } from 'claude-code'
 import type { Io, SkillCapture, WatchedEvent } from '../types'
 import { parseConfig } from './config'
 import { SelfCheck } from './selfcheck'
-import { fromFrontmatter, fromOverride, listsName, overrideFile, overrideLookups, resolveDeclared, unnamedOverride } from './contract'
+import { fromFrontmatter, fromOverride, listsName, MANAGED_SOURCE, overrideFile, overrideLookups, resolveDeclared, unnamedOverride } from './contract'
 import type { Tier } from './contract'
 import { contentHash, keepLatest, reason, SaveQueue, SKILLS_SHAPE, SkillTracker, UNATTRIBUTED } from './skills'
 
@@ -132,11 +132,13 @@ export const register: Register = (on, options) => {
     saves.add(async () => {
       try {
         // P1.3: the declared contract. Read here, after the hook answers, because nothing answers from it yet. P1.5,
-        // whose footer is built from it, moves the read back into the hook (owner, 2026-11-06). An override file is
-        // read only when the frontmatter gives no contract.
+        // whose footer is built from it, moves the read back into the hook (owner, 2026-11-06). The override file is
+        // read whatever the frontmatter declares, because it wins (P1.4), except beside a managed skill's valid block,
+        // which it can't replace.
         const frontmatter = fromFrontmatter(e.frontmatter, e.frontmatterProblem)
+        const managed = e.source === MANAGED_SOURCE
         let override: Tier | undefined
-        if (!frontmatter.contract) {
+        if (!(managed && frontmatter.contract)) {
           // A name that can't name a file reads none, and the problem says why.
           const name = overrideFile(e.skill)
           let file: string | undefined
@@ -167,7 +169,7 @@ export const register: Register = (on, options) => {
           }
           override = name === undefined ? unnamedOverride(e.skill) : fromOverride(file, unreadable)
         }
-        const declared = resolveDeclared(frontmatter, override)
+        const declared = resolveDeclared(frontmatter, override, managed)
         for (const problem of declared.problems) {
           $.ui.log(`taskmaster: ${e.skill}: ${problem.where} contract set aside: ${problem.message}`, { to: 'debug' })
         }
