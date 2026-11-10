@@ -187,10 +187,13 @@ export function overrideLookups(root: string, overrideDir: string, name: string)
 /**
  * Whether a folder's listing holds `child`, a name that may be the same on its disk (#21): in any case (owner,
  * 2026-11-09), as a case-insensitive disk opens `Notes.json` for `notes.json`, and in any Unicode form (the cold review
- * of #22), as macOS lists in NFD a name the settings give in NFC.
+ * of #22), as macOS lists in NFD a name the settings give in NFC. Case is folded both ways (Codex's review of #22,
+ * 2026-11-09), so letters that `toLowerCase` alone keeps apart match too: final sigma and sigma, sharp s and `SS`, long
+ * s and `s`, and dotless or dotted i and `i`. That folds more than some disks do, which costs only a debug line.
  */
 export function listsName(entries: readonly { name: string }[], child: string): boolean {
-  const key = (name: string): string => name.normalize('NFC').toLowerCase()
+  const key = (name: string): string =>
+    name.normalize('NFC').toLowerCase().toUpperCase().toLowerCase().replace(/i\u0307/g, 'i').normalize('NFC')
   return entries.some(entry => key(entry.name) === key(child))
 }
 

@@ -256,6 +256,36 @@ test("a folder's listing holds the next name in any case or Unicode form", () =>
   expect(listsName([], 'notes.json')).toBe(false)
 })
 
+// Codex's adversarial review of #22 (2026-11-09). A case-insensitive disk may fold letters that `toLowerCase` alone
+// keeps apart: final sigma, sharp s, long s, dotless and dotted i, the micro sign. Each pair is checked both ways round.
+const bothWays = (a: string, b: string) => [listsName([{ name: a }], b), listsName([{ name: b }], a)]
+
+test("a folder's listing holds a name whose letters a case-insensitive disk may fold", () => {
+  expect(bothWays('\u03C2', '\u03A3')).toEqual([true, true])
+  expect(bothWays('\u03C2', '\u03C3')).toEqual([true, true])
+  expect(bothWays('\u03BF\u03B4\u03BF\u03C3', '\u039F\u0394\u039F\u03A3')).toEqual([true, true])
+  expect(bothWays('stra\u00DFe', 'STRASSE')).toEqual([true, true])
+  expect(bothWays('\u1E9E', 'SS')).toEqual([true, true])
+  expect(bothWays('\u017F', 's')).toEqual([true, true])
+  expect(bothWays('\u0131', 'I')).toEqual([true, true])
+  expect(bothWays('\u00B5', '\u03BC')).toEqual([true, true])
+  expect(bothWays('\u0130', 'i')).toEqual([true, true])
+  expect(bothWays('I\u0307', 'i')).toEqual([true, true])
+  expect(bothWays('D\u0130Z\u0130N', 'dizin')).toEqual([true, true])
+  expect(bothWays('i\u0307\u0301', '\u00ED')).toEqual([true, true])
+})
+
+test("a folder's listing keeps the matches it had, and still tells apart names no disk folds", () => {
+  expect(bothWays('\u1E9E', '\u00DF')).toEqual([true, true])
+  expect(bothWays('\u0130', 'i\u0307')).toEqual([true, true])
+  expect(bothWays('\u03B1\u0345\u0301', '\u1FB4')).toEqual([true, true])
+  expect(bothWays('q\u0307', 'q')).toEqual([false, false])
+  expect(bothWays('\u0227', 'a')).toEqual([false, false])
+  expect(bothWays('\u00E9', 'e')).toEqual([false, false])
+  expect(bothWays('\uFF41', 'a')).toEqual([false, false])
+  expect(bothWays('\u03C3', '\u03C4')).toEqual([false, false])
+})
+
 // ------------------------------------------------------------ in a session
 
 const OVERRIDE_PATH = '/repo/.taskmaster/overrides/notes.json'
@@ -421,6 +451,15 @@ test('an override folder listed in another Unicode form is set aside too', { opt
   await load($, {})
 
   await expectSetAside(world, ['/repo/cfg/\u00DCberschreibungen/notes.json'])
+})
+
+// Codex's adversarial review of #22 (2026-11-09): the same walk, with a folder the disk lists with a final sigma where
+// the settings give a capital one.
+test('an override folder listed with another form of sigma is set aside too', { options: { overrideDir: 'cfg/\u03A3' } }, async ($, on) => {
+  const world = await session($, on, { unreadableFiles: ['/repo/cfg/\u03C2/notes.json'] })
+  await load($, {})
+
+  await expectSetAside(world, ['/repo/cfg/\u03A3/notes.json'])
 })
 
 test("an override that can't be read in the folder the settings name is set aside too", { options: { overrideDir: 'state/overrides' } }, async ($, on) => {
